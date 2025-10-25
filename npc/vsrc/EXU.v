@@ -1,3 +1,10 @@
+// 执行单元 (Execution Unit)
+// 当前为单体设计，后续可分解为：
+// - IDU: 指令译码单元 (Instruction Decode Unit)
+// - ALU: 算术逻辑单元 (Arithmetic Logic Unit) 
+// - LSU: 访存单元 (Load Store Unit)
+// - CSR: 控制状态寄存器单元 (Control Status Register Unit)
+// - BRU: 分支单元 (Branch Unit)
 module EXU (
     input clk,
     input rst,
@@ -11,7 +18,7 @@ module EXU (
     output reg ebreak_flag,     // ebreak 指令执行标志
     output reg [31:0] exit_code, // 添加退出码输出
     
-    // 内存接口
+    // 内存接口 (后续可扩展为AXI4-Lite总线接口)
     output reg mem_read,       // 内存读使能
     output reg mem_write,      // 内存写使能
     output reg [31:0] mem_addr, // 内存地址
@@ -19,7 +26,7 @@ module EXU (
     output reg [3:0] mem_mask,   // 字节使能
     input [31:0] mem_rdata,      // 从内存读取的数据
     
-    // 添加寄存器接口用于DiffTest
+    // 寄存器接口用于DiffTest
     output [31:0] regs [0:31]
 );
     
@@ -32,6 +39,20 @@ module EXU (
     wire [31:0] rdata1;
     wire [31:0] rdata2;
     
+    // ========== CSR寄存器模块 ==========
+    // CSR寄存器定义
+    reg [31:0] mtvec;   // 机器模式异常向量基址
+    reg [31:0] mepc;    // 机器模式异常程序计数器
+    reg [31:0] mcause;  // 机器模式异常原因
+    reg [31:0] mstatus; // 机器模式状态寄存器
+    
+    // CSR相关信号
+    reg csr_wen;        // CSR写使能
+    reg [31:0] csr_wdata; // CSR写数据
+    reg [31:0] csr_rdata; // CSR读数据
+    wire [11:0] csr_addr = op[31:20]; // CSR地址
+    
+    // ========== 指令译码模块 (IDU) ==========
     // 操作码和功能码提取
     wire [6:0] opcode = op[6:0];
     wire [2:0] funct3 = op[14:12];
@@ -53,6 +74,8 @@ module EXU (
     wire [31:0] imm_b_sext = {{19{imm_b[12]}}, imm_b};
     wire [31:0] imm_j_sext = {{11{imm_j[20]}}, imm_j};
     
+    // ========== 分支单元 (BRU) ==========
+    
     // 指令状态
     reg [2:0] state;
     parameter IDLE = 3'b000;
@@ -70,9 +93,27 @@ module EXU (
                        (funct3 == 3'b111) ? (rdata1 >= rdata2) :
                        1'b0;
     
+    // ========== 寄存器文件 ==========
+    
     // 修改寄存器状态检查方法
     // 由于无法直接访问i0.regs，我们使用32个单独的wire来获取寄存器值
     wire [31:0] reg_values [0:31];
+    
+    // ========== 访存单元 (LSU) ==========
+    // 内存访问临时存储
+    reg [31:0] mem_result;
+    
+    // ========== CSR读逻辑 ==========
+    // CSR读逻辑（组合逻辑）
+    always @(*) begin
+        case (csr_addr)
+            12'h305: csr_rdata = mtvec;   // mtvec
+            12'h341: csr_rdata = mepc;    // mepc  
+            12'h342: csr_rdata = mcause;  // mcause
+            12'h300: csr_rdata = mstatus; // mstatus
+            default: csr_rdata = 32'h0;
+        endcase
+    end
     
     // 修改后的寄存器文件实例化，添加寄存器值输出
     RegisterFile #(.ADDR_WIDTH(5), .DATA_WIDTH(32)) i0 (
@@ -88,9 +129,9 @@ module EXU (
         .reg_values(reg_values)  // 添加这一行用于获取所有寄存器值
     );
     
-    // 内存访问临时存储
-    reg [31:0] mem_result;
+    // ========== 算术逻辑单元 (ALU) + 控制状态寄存器单元 (CSR) ==========
     
+    // ========== 主控制单元 ==========
     // 指令执行状态机
     always @(posedge clk or posedge rst) begin
         if (rst) begin
@@ -102,6 +143,13 @@ module EXU (
             mem_read <= 0;
             mem_write <= 0;
             ebreak_flag <= 0;
+            
+            // 初始化CSR寄存器
+            mtvec <= 32'h80000000;  // 异常向量基址
+            mepc <= 32'h0;          // 异常程序计数器
+            mcause <= 32'h0;        // 异常原因
+            mstatus <= 32'h0;       // 状态寄存器
+            csr_wen <= 0;
         end else begin
             case (state)
                 IDLE: begin
@@ -113,6 +161,7 @@ module EXU (
                         mem_read <= 0;
                         mem_write <= 0;
                         ebreak_flag <= 0;  // 清除 ebreak 标志
+                        csr_wen <= 0;      // 清除CSR写使能
                     end
                 end
                 
@@ -281,13 +330,56 @@ module EXU (
                             next_pc <= pc + 4; // 默认PC+4
                         end
                         
-                        // SYSTEM 指令 (包含 ebreak)
+                        // SYSTEM 指令 (包含 ebreak, ecall, mret, CSR指令)
                         7'b1110011: begin
-                            if (funct3 == 3'b000 && imm_i == 12'h001) begin
-                                ebreak_flag <= 1;
-                                exit_code <= reg_values[10];
-                            end
-                            next_pc <= pc + 4; // 默认PC+4
+                            case (funct3)
+                                3'b000: begin // 特权指令
+                                    case (imm_i)
+                                        12'h001: begin // ebreak
+                                            ebreak_flag <= 1;
+                                            exit_code <= reg_values[10];
+                                            next_pc <= pc + 4;
+                                        end
+                                        12'h000: begin // ecall
+                                            // 保存异常上下文
+                                            mepc <= pc;
+                                            mcause <= 32'd11; // Environment call from M-mode
+                                            // 跳转到异常处理程序
+                                            next_pc <= mtvec;
+                                        end
+                                        12'h302: begin // mret
+                                            // 从异常返回
+                                            next_pc <= mepc;
+                                        end
+                                        default: next_pc <= pc + 4;
+                                    endcase
+                                end
+                                3'b001: begin // csrrw - CSR Read and Write
+                                    waddr <= rd[4:0];
+                                    wdata <= csr_rdata; // 读取CSR值到rd
+                                    wen <= (rd != 5'b0); // 只有rd不为0时才写入
+                                    csr_wdata <= rdata1; // rs1的值写入CSR
+                                    csr_wen <= 1;
+                                    next_pc <= pc + 4;
+                                end
+                                3'b010: begin // csrrs - CSR Read and Set
+                                    waddr <= rd[4:0];
+                                    wdata <= csr_rdata; // 读取CSR值到rd
+                                    wen <= (rd != 5'b0); // 只有rd不为0时才写入
+                                    csr_wdata <= csr_rdata | rdata1; // 设置位
+                                    csr_wen <= (rs1 != 5'b0); // 只有rs1不为0时才写入CSR
+                                    next_pc <= pc + 4;
+                                end
+                                3'b011: begin // csrrc - CSR Read and Clear
+                                    waddr <= rd[4:0];
+                                    wdata <= csr_rdata; // 读取CSR值到rd
+                                    wen <= (rd != 5'b0); // 只有rd不为0时才写入
+                                    csr_wdata <= csr_rdata & (~rdata1); // 清除位
+                                    csr_wen <= (rs1 != 5'b0); // 只有rs1不为0时才写入CSR
+                                    next_pc <= pc + 4;
+                                end
+                                default: next_pc <= pc + 4;
+                            endcase
                             state <= WRITEBACK;
                         end
                         
@@ -334,6 +426,19 @@ module EXU (
                 
                 WRITEBACK: begin
                     // $display("next_pc=0x%x",next_pc);
+                    
+                    // CSR写入逻辑
+                    if (csr_wen) begin
+                        case (csr_addr)
+                            12'h305: mtvec <= csr_wdata;   // mtvec
+                            12'h341: mepc <= csr_wdata;    // mepc
+                            12'h342: mcause <= csr_wdata;  // mcause
+                            12'h300: mstatus <= csr_wdata; // mstatus
+                            default: ; // 其他CSR地址不处理
+                        endcase
+                        csr_wen <= 0;
+                    end
+                    
                     state <= IDLE;
                     ex_end <= ~ex_end;  // 指令执行完成，切换ex_end信号
                     wen <= 0;
