@@ -7,10 +7,9 @@ BUILD_DIR    := obj_dir         # Verilator 默认生成中间文件和可执行
 SIM_EXE      := $(BUILD_DIR)/V$(TOP)  # 仿真可执行文件名称，例如 obj_dir/Vtop
 GTKWAVE      ?= gtkwave         # GTKWave 可执行文件名，默认 gtkwave，可被覆盖
 
-# verilator 参数
+# verilator 参数（默认不生成波形）
 VFLAGS       := --cc $(SRC_V) \  # 生成 C++ 模拟代码
                 --exe $(SRC_CPP) \  # 编译并链接测试驱动
-                --trace \           # 打开 trace 支持（可生成波形文件）
                 -CFLAGS "-O2 -Wall" \  # 传给 g++ 的编译选项：O2 优化 + 显示所有警告
                 --build -j 0        # 直接在 configure 后执行 make -j（auto）
 
@@ -20,15 +19,29 @@ all: $(SIM_EXE)               # 默认目标：编译生成仿真可执行文件
 
 # 生成可执行仿真程序
 $(SIM_EXE): $(SRC_V) $(SRC_CPP)
-	$(VERILATOR) $(VFLAGS)  # 调用 verilator，依据 VFLAGS 生成并编译代码，最终产出 obj_dir/Vtop
+
 
 # 直接跑仿真
 run: all
-	$(SIM_EXE)              # 运行仿真可执行文件，产生 waveform.vcd（若代码里有 dump 调用）
+	$(SIM_EXE)              # 运行仿真可执行文件
 
-# 打开波形
-wave: run
-	$(GTKWAVE) waveform.vcd  # 用 GTKWave 载入生成的 VCD 波形。注意可参考上次建议，改用 FST 格式减小文件体积
+# 如需波形，提供单独目标（会生成 FST 波形更节省空间）
+WAVE_FILE := waveform.fst
+wave:
+	$(VERILATOR) $(VFLAGS) --trace-fst
+	$(SIM_EXE)
+	@echo "打开波形: $(WAVE_FILE)（若波形未生成，请确认 testbench 中有 dump 调用）"
+	@if [ -f $(WAVE_FILE) ]; then \
+		$(GTKWAVE) $(WAVE_FILE); \
+	else \
+		FOUND=$$(find . -maxdepth 1 -name "*.fst" -o -name "*.vcd" | head -n1); \
+		if [ -n "$$FOUND" ]; then \
+			echo "找到波形文件: $$FOUND"; \
+			$(GTKWAVE) $$FOUND; \
+		else \
+			echo "未生成波形文件。"; \
+		fi; \
+	fi
 
 clean:
-	rm -rf $(BUILD_DIR) waveform.vcd  # 删除中间编译目录和波形文件，恢复“干净”状态
+	rm -rf $(BUILD_DIR) waveform.vcd waveform.fst  # 删除中间编译目录和波形文件，恢复“干净”状态

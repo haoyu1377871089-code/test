@@ -8,7 +8,10 @@ GTKWAVE      ?= gtkwave
 
 VERILATOR = verilator
 VERILATOR_CFLAGS += -MMD --build -cc  \
-                --trace \
+                -O3 --x-assign fast --x-initial fast --noassert
+
+# 禁用VCD波形生成以节省磁盘空间（用于主频评估）
+VERILATOR_CFLAGS_NO_TRACE = -MMD --build -cc  \
                 -O3 --x-assign fast --x-initial fast --noassert
 
 BUILD_DIR = ./build
@@ -43,7 +46,7 @@ SDL2_CFLAGS := -I/usr/include/SDL2
 SDL2_LDFLAGS := -lSDL2
 endif
 
-# 添加C++11标准支持 + AM头文件
+
 CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(TOPNAME)\"" -std=c++11 -I$(AM_HOME)/am/include $(SDL2_CFLAGS)
 # 添加-lrt用于时间函数 + pthread用于键盘线程 + SDL2
 LDFLAGS += -ldl -lrt -lpthread $(SDL2_LDFLAGS)
@@ -52,8 +55,15 @@ $(BIN): $(VSRCS) $(CSRCS) $(NVBOARD_ARCHIVE)
 	@rm -rf $(OBJ_DIR)
 	$(VERILATOR) $(VERILATOR_CFLAGS) \
         --top-module $(TOPNAME) $^ \
-        --trace \
         $(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
+        --Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
+
+# 构建不生成VCD波形的版本（用于性能评估）
+$(BIN)-notrace: $(VSRCS) $(CSRCS) $(NVBOARD_ARCHIVE)
+	@rm -rf $(OBJ_DIR)
+	$(VERILATOR) $(VERILATOR_CFLAGS_NO_TRACE) \
+        --top-module $(TOPNAME) $^ \
+        $(addprefix -CFLAGS , $(CXXFLAGS) -DVM_TRACE=0) $(addprefix -LDFLAGS , $(LDFLAGS)) \
         --Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
 
 # 波形文件路径
@@ -70,7 +80,16 @@ run: $(BIN)
         $(BIN); \
 	fi
 
-# 添加 wave 目标 - 运行仿真并查看波形
+# 运行不生成VCD的版本（用于性能评估）
+run-notrace: $(BIN)-notrace
+	@if [ -n "$(IMG)" ]; then \
+        echo "Running NPC (no VCD) with program: $(IMG)"; \
+        $(BIN) $(IMG); \
+	else \
+        echo "Running NPC (no VCD) without program specified"; \
+        $(BIN); \
+	fi
+
 wave: $(BIN)
 	@echo "Running simulation with wave tracing enabled..."
 	@$(BIN)
@@ -96,8 +115,9 @@ help:
 	@echo "NPC Makefile 帮助"
 	@echo "================="
 	@echo "可用目标："
-	@echo "  default, all   : 构建仿真可执行文件"
-	@echo "  run            : 运行仿真"
+	@echo "  default, all   : 构建仿真可执行文件（默认不生成波形）"
+	@echo "  run            : 运行仿真（默认不生成波形）"
+	@echo "  run-notrace    : 运行仿真（不生成VCD，节省磁盘空间）"
 	@echo "  wave           : 启用波形跟踪运行仿真并打开 GTKWave"
 	@echo "  clean          : 清除所有构建产物"
 	@echo "  help           : 显示此帮助信息"

@@ -27,16 +27,12 @@ module RegisterFile #(parameter ADDR_WIDTH = 5, parameter DATA_WIDTH = 32) (
     if (rst) begin
       // 复位时将所有寄存器清零
       for (i = 0; i < 2**ADDR_WIDTH; i = i + 1) begin
-        rf[i] <= {DATA_WIDTH{1'b0}};
+        rf[i] = {DATA_WIDTH{1'b0}};
       end
     end else if (wen) begin
       // 考虑特殊情况：R0通常为硬件零
       if (waddr != {ADDR_WIDTH{1'b0}}) begin
         rf[waddr] <= wdata;
-        // 特别关注ra寄存器(x1)的写入
-        // if (waddr == 5'd1) begin
-        //   $display("写入RA(x1)寄存器: 0x%x 在时间 %t", wdata, $time);
-        // end
       end
     end
   end

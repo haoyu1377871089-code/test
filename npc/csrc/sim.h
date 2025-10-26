@@ -33,6 +33,11 @@ extern "C" void npc_set_exit_after_frames(int n);
 
 // 来自 loop.cpp 的仿真驱动接口
 struct Vtop;
+#if VM_TRACE
 class VerilatedVcdC;
 void execute_first_instruction(Vtop *top, uint32_t currentPC, VerilatedVcdC *tfp, uint64_t &sim_time);
 bool process_one_cycle(Vtop *top, uint32_t &currentPC, bool &sdop_en_state, VerilatedVcdC *tfp, uint64_t &sim_time);
+#else
+void execute_first_instruction(Vtop *top, uint32_t currentPC, void *tfp, uint64_t &sim_time);
+bool process_one_cycle(Vtop *top, uint32_t &currentPC, bool &sdop_en_state, void *tfp, uint64_t &sim_time);
+#endif

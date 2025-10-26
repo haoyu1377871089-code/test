@@ -24,7 +24,11 @@ extern "C" void npc_set_exit_after_frames(int n);
 
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
+#if VM_TRACE
     Verilated::traceEverOn(true);
+#else
+    Verilated::traceEverOn(false);
+#endif
 
     // 解析参数：检测 --kbd-demo，查找第一个非选项作为镜像路径
     std::vector<std::string> args;
@@ -90,9 +94,12 @@ int main(int argc, char **argv) {
 
     // 创建顶层模块与波形
     Vtop *top = new Vtop;
-    VerilatedVcdC *tfp = new VerilatedVcdC;
+    VerilatedVcdC *tfp = nullptr;
+#if VM_TRACE
+    tfp = new VerilatedVcdC;
     top->trace(tfp, 99);
     tfp->open("./build/dump.vcd");
+#endif
 
     // 加载镜像到内存
     loadImageToMemory(imgPath, CONFIG_MBASE);
@@ -105,11 +112,26 @@ int main(int argc, char **argv) {
     top->sdop_en = 0;
 
     for (int i = 0; i < 5; i++) {
-        top->clk = !top->clk; top->eval(); tfp->dump(sim_time++);
-        top->clk = !top->clk; top->eval(); tfp->dump(sim_time++);
+        top->clk = !top->clk; top->eval();
+#if VM_TRACE
+        if (tfp) tfp->dump(sim_time++);
+#else
+        sim_time++;
+#endif
+        top->clk = !top->clk; top->eval();
+#if VM_TRACE
+        if (tfp) tfp->dump(sim_time++);
+#else
+        sim_time++;
+#endif
     }
 
-    top->rst = 0; top->eval(); tfp->dump(sim_time++);
+    top->rst = 0; top->eval();
+#if VM_TRACE
+    if (tfp) tfp->dump(sim_time++);
+#else
+    sim_time++;
+#endif
 
     uint32_t currentPC = CONFIG_MBASE;
     bool sdop_en_state = false;
@@ -139,8 +161,10 @@ int main(int argc, char **argv) {
 
     int retcode = (top->exit_code == 0) ? 0 : 1;
 
-    tfp->close();
-    delete top;
+#if VM_TRACE
+    if (tfp) tfp->close();
     delete tfp;
+#endif
+    delete top;
     return retcode;
 }

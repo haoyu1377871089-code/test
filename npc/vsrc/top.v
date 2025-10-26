@@ -51,12 +51,29 @@ wire ebreak_detected;  // 新增的内部信号
 wire [31:0] exit_value;
 reg [31:0] exit_code_reg;
 
-// EXU模块实例化
+// ========= 指令存储器（IMEM，256x32b） =========
+// 将PC转换为字地址索引（低两位舍弃）
+wire [31:0] imem_word_index = ((pc - 32'h8000_0000) >> 2);
+wire [7:0] imem_idx = imem_word_index[7:0];
+wire [31:0] imem_rdata1;
+wire [31:0] imem_rdata2;
+wire [31:0] imem_reg_values [0:255];
+// 指令存储器仅读，不在此写入（可通过仿真或后续加载机制预置）
+RegisterFile #(.ADDR_WIDTH(8), .DATA_WIDTH(32)) IMEM (
+  .clk(clk), .rst(rst),
+  .wdata(32'h0), .waddr(8'h0), .wen(1'b0),
+  .raddr1(imem_idx), .rdata1(imem_rdata1),
+  .raddr2(imem_idx), .rdata2(imem_rdata2),
+  .reg_values(imem_reg_values)
+);
+
+// 可选：当外部未提供op时，使用IMEM读取值（保持兼容）
+// wire [31:0] op_from_imem = imem_rdata1;
 EXU EXU (
     .clk         (clk),
     .rst         (rst),
-    .op          (op),          // 操作码
-    .op_en       (sdop_en),     // 操作使能
+    .op          (op_ifu),      // 由 IFU 返回的指令
+    .op_en       (op_en_ifu),   // IFU 的有效握手
     .pc          (pc),          // 当前指令的PC
     
     .ex_end      (ex_end),      // 执行完成信号
@@ -100,6 +117,11 @@ always @(posedge clk or posedge rst) begin
         rdop_en_prev <= 1'b0;
         update_pc <= 1'b0;
         exit_code_reg <= 32'h0;
+        // IFU 相关复位
+        first_fetch_pending <= 1'b1; // 复位后需要首次取指
+        ifu_req <= 1'b0;
+        op_en_ifu <= 1'b0;
+        op_ifu <= 32'h0;
     end else begin
         // 保存ex_end和rdop_en的前一个状态用于检测变化
         ex_end_prev <= ex_end;
@@ -119,6 +141,25 @@ always @(posedge clk or posedge rst) begin
             // 在检测到下降沿后的下一个周期更新PC，使用EXU提供的next_pc
             pc <= next_pc;
             update_pc <= 1'b0;
+        end
+        
+        // IFU 请求脉冲：
+        // - 复位后的首次取指打一拍
+        // - 在更新PC的那个周期为下一条指令发起取指
+        if (first_fetch_pending) begin
+            ifu_req <= 1'b1;
+            first_fetch_pending <= 1'b0;
+        end else if (update_pc) begin
+            ifu_req <= 1'b1;
+        end else begin
+            ifu_req <= 1'b0;
+        end
+
+        // 当 IFU 返回有效时，打一拍通知 EXU 并提供指令
+        op_en_ifu <= 1'b0; // 缺省无效
+        if (ifu_rvalid) begin
+            op_ifu <= ifu_rdata;
+            op_en_ifu <= 1'b1;
         end
         
         // 添加 end_flag_reg 更新逻辑
@@ -174,5 +215,27 @@ assign x28 = exu_regs[28];
 assign x29 = exu_regs[29];
 assign x30 = exu_regs[30];
 assign x31 = exu_regs[31];
+
+// IFU 取指 SRAM 接口与握手
+wire        ifu_rvalid;
+wire [31:0] ifu_rdata;
+reg         ifu_req;
+reg         first_fetch_pending;
+reg         op_en_ifu;
+reg  [31:0] op_ifu;
+// 在更新PC的那个周期，用 next_pc 作为取指地址；
+// 其他情况（包括复位后的首次取指）使用当前 pc
+wire [31:0] ifu_addr = (update_pc) ? next_pc : pc;
+
+// EXU 已在前文实例化并接入 IFU 的指令与握手，这里删除重复实例
+// IFU SRAM 实例化：通过 DPI-C 读物理内存，1周期延迟返回
+IFU_SRAM u_ifu (
+    .clk    (clk),
+    .rst    (rst),
+    .req    (ifu_req),
+    .addr   (ifu_addr),
+    .rvalid (ifu_rvalid),
+    .rdata  (ifu_rdata)
+);
 
 endmodule
