@@ -21,16 +21,20 @@ wire ex_end;                // EXU执行完成信号
 wire [31:0] next_pc;        // 从EXU获取的下一条指令PC
 wire branch_taken;          // 分支是否taken
   
-// LSU SRAM接口信号
-wire lsu_req;                    // LSU访存请求
-wire lsu_wen;                    // LSU写使能
-wire [31:0] lsu_addr;            // LSU地址
-wire [31:0] lsu_wdata;           // LSU写数据
-wire [3:0] lsu_wmask;            // LSU写掩码
-wire lsu_rvalid;                 // LSU读数据有效
-wire [31:0] lsu_rdata;           // LSU读数据
+// 内存接口信号 - 使用顶层模块的输入或内部生成的信号
+wire mem_read_int;               // 内部内存读使能
+wire mem_write_int;              // 添加这一行：内部内存写使能信号
+wire [31:0] mem_addr_int;        // 内部内存地址
+wire [31:0] mem_wdata_int;       // 内部写入内存的数据
+wire [3:0] mem_mask_int;         // 内部字节使能
+wire [31:0] mem_rdata;           // 从内存读取的数据
 
-
+// 选择内存接口信号 - 精简为仅使用内部生成的信号
+// wire mem_read_final = mem_read_int;
+// wire mem_write_final = mem_write_int;
+// wire [31:0] mem_addr_final = mem_addr_int;
+// wire [31:0] mem_wdata_final = mem_wdata_int;
+// wire [3:0] mem_mask_final = mem_mask_int;
 
 // IFU相关代码
 reg [31:0] pc;          // 程序计数器
@@ -76,33 +80,31 @@ EXU EXU (
     .next_pc     (next_pc),     // 下一条指令的PC
     .branch_taken(branch_taken), // 分支是否taken
     
-    // LSU SRAM接口
-    .lsu_req     (lsu_req),         // LSU访存请求
-    .lsu_wen     (lsu_wen),         // LSU写使能
-    .lsu_addr    (lsu_addr),        // LSU地址
-    .lsu_wdata   (lsu_wdata),       // LSU写数据
-    .lsu_wmask   (lsu_wmask),       // LSU写掩码
-    .lsu_rvalid  (lsu_rvalid),      // LSU读数据有效
-    .lsu_rdata   (lsu_rdata),       // LSU读数据
+    // 内存接口 - 连接到内部信号
+    .mem_read    (mem_read_int),    // 内存读使能
+    .mem_write   (mem_write_int),   // 内存写使能
+    .mem_addr    (mem_addr_int),    // 内存地址
+    .mem_wdata   (mem_wdata_int),   // 写入内存的数据
+    .mem_mask    (mem_mask_int),    // 字节使能
+    .mem_rdata   (mem_rdata),       // 从内存读取的数据
     .ebreak_flag (ebreak_detected),
     .exit_code   (exit_value),      // 连接到退出码信号
     // 寄存器接口
     .regs        (exu_regs)
 );
 
-// LSU SRAM模块实例化
-LSU_SRAM LSU_SRAM (
+// 内存模块实例化 - 使用最终的信号
+MEM MEM (
     .clk         (clk),
     .rst         (rst),
     
-    // SRAM接口
-    .req         (lsu_req),
-    .wen         (lsu_wen),
-    .addr        (lsu_addr),
-    .wdata       (lsu_wdata),
-    .wmask       (lsu_wmask),
-    .rvalid      (lsu_rvalid),
-    .rdata       (lsu_rdata)
+    // 内存接口
+    .mem_read    (mem_read_int),
+    .mem_write   (mem_write_int),
+    .mem_addr    (mem_addr_int),
+    .mem_wdata   (mem_wdata_int),
+    .mem_mask    (mem_mask_int),
+    .mem_rdata   (mem_rdata)
 );
 
 // 初始化与复位逻辑

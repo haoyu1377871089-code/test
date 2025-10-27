@@ -18,14 +18,13 @@ module EXU (
     output reg ebreak_flag,     // ebreak 指令执行标志
     output reg [31:0] exit_code, // 添加退出码输出
     
-    // LSU SRAM接口
-    output reg lsu_req,        // LSU访存请求
-    output reg lsu_wen,        // LSU写使能
-    output reg [31:0] lsu_addr, // LSU地址
-    output reg [31:0] lsu_wdata, // LSU写数据
-    output reg [3:0] lsu_wmask,  // LSU写掩码
-    input lsu_rvalid,          // LSU读数据有效
-    input [31:0] lsu_rdata,    // LSU读数据
+    // 内存接口 (后续可扩展为AXI4-Lite总线接口)
+    output reg mem_read,       // 内存读使能
+    output reg mem_write,      // 内存写使能
+    output reg [31:0] mem_addr, // 内存地址
+    output reg [31:0] mem_wdata, // 写入内存的数据
+    output reg [3:0] mem_mask,   // 字节使能
+    input [31:0] mem_rdata,      // 从内存读取的数据
     
     // 寄存器接口用于DiffTest
     output [31:0] regs [0:31]
@@ -83,8 +82,7 @@ module EXU (
     parameter DECODE = 3'b001;
     parameter EXECUTE = 3'b010;
     parameter MEMORY = 3'b011;
-    parameter WAIT_LSU = 3'b100;
-    parameter WRITEBACK = 3'b101;
+    parameter WRITEBACK = 3'b100;
 
     // 组合分支条件（避免在时序块里先非阻塞赋值再使用造成时序问题）
     wire branch_cond = (funct3 == 3'b000) ? (rdata1 == rdata2) :
@@ -142,8 +140,8 @@ module EXU (
             wen <= 0;
             branch_taken <= 0;
             next_pc <= 0;
-            lsu_req <= 0;
-            lsu_wen <= 0;
+            mem_read <= 0;
+            mem_write <= 0;
             ebreak_flag <= 0;
             
             // 初始化CSR寄存器
@@ -160,14 +158,15 @@ module EXU (
                         wen <= 0;
                         branch_taken <= 0;
                         
-                        lsu_req <= 0;
-                        lsu_wen <= 0;
+                        mem_read <= 0;
+                        mem_write <= 0;
                         ebreak_flag <= 0;  // 清除 ebreak 标志
                         csr_wen <= 0;      // 清除CSR写使能
                     end
                 end
                 
                 DECODE: begin
+                    // 其实没必要，这里强行多打了一拍
                     raddr1 <= rs1[4:0]; 
                     raddr2 <= rs2[4:0];
                     state <= EXECUTE;
@@ -243,44 +242,42 @@ module EXU (
                         
                         // 加载指令
                         7'b0000011: begin
-                            lsu_addr <= rdata1 + imm_i_sext;
-                            lsu_req <= 1;
-                            lsu_wen <= 0; // 读操作
+                            mem_addr <= rdata1 + imm_i_sext;
+                            mem_read <= 1;
                             waddr <= rd[4:0];
                             wen <= 1;
                             next_pc <= pc + 4; // 默认PC+4
                             case (funct3)
                                 // LB, LH, LW, LBU, LHU
-                                3'b000: lsu_wmask <= 4'b0001; // LB
-                                3'b001: lsu_wmask <= 4'b0011; // LH
-                                3'b010: lsu_wmask <= 4'b1111; // LW
-                                3'b100: lsu_wmask <= 4'b0001; // LBU
-                                3'b101: lsu_wmask <= 4'b0011; // LHU
+                                3'b000: mem_mask <= 4'b0001; // LB
+                                3'b001: mem_mask <= 4'b0011; // LH
+                                3'b010: mem_mask <= 4'b1111; // LW
+                                3'b100: mem_mask <= 4'b0001; // LBU
+                                3'b101: mem_mask <= 4'b0011; // LHU
                                 default: begin
-                                    lsu_req <= 0;
+                                    mem_read <= 0;
                                     wen <= 0;
                                 end
                             endcase
-                            state <= WAIT_LSU;
+                            state <= MEMORY;
                         end
                         
                         // 存储指令
                         7'b0100011: begin
-                            lsu_addr <= rdata1 + imm_s_sext;
-                            lsu_wdata <= rdata2;
-                            lsu_req <= 1;
-                            lsu_wen <= 1; // 写操作
+                            mem_addr <= rdata1 + imm_s_sext;
+                            mem_wdata <= rdata2;
+                            mem_write <= 1;
                             next_pc <= pc + 4; // 默认PC+4
                             case (funct3)
-                                // SB: 写入从 lsu_addr 起始的1字节
-                                3'b000: lsu_wmask <= 4'b0001;
-                                // SH: 写入从 lsu_addr 起始的2字节（允许非对齐）
-                                3'b001: lsu_wmask <= 4'b0011;
-                                // SW: 写入从 lsu_addr 起始的4字节（允许非对齐）
-                                3'b010: lsu_wmask <= 4'b1111;
-                                default: lsu_req <= 0;
+                                // SB: 写入从 mem_addr 起始的1字节
+                                3'b000: mem_mask <= 4'b0001;
+                                // SH: 写入从 mem_addr 起始的2字节（允许非对齐）
+                                3'b001: mem_mask <= 4'b0011;
+                                // SW: 写入从 mem_addr 起始的4字节（允许非对齐）
+                                3'b010: mem_mask <= 4'b1111;
+                                default: mem_write <= 0;
                             endcase
-                            state <= WRITEBACK; // 写操作不需要等待
+                            state <= MEMORY;
                         end
                         
                         // 分支指令
@@ -394,48 +391,41 @@ module EXU (
                     
                 end
                 
-                WAIT_LSU: begin
-                    // 清除LSU请求信号
-                    lsu_req <= 0;
+                MEMORY: begin
+                    mem_read <= 0;
+                    mem_write <= 0;
                     
-                    // 等待LSU读数据有效
-                    if (lsu_rvalid) begin
-                        if (opcode == 7'b0000011) begin // 加载指令
-                            case (funct3)
-                                // LB: 从 lsu_addr 起始位置取1字节并符号扩展
-                                3'b000: begin
-                                    wdata <= {{24{lsu_rdata[7]}}, lsu_rdata[7:0]};
-                                end
-                                // LH: 从 lsu_addr 起始位置取2字节并符号扩展（允许非对齐）
-                                3'b001: begin
-                                    wdata <= {{16{lsu_rdata[15]}}, lsu_rdata[15:0]};
-                                end
-                                // LW: 从 lsu_addr 起始位置取4字节（允许非对齐）
-                                3'b010: begin
-                                    wdata <= lsu_rdata;
-                                end
-                                // LBU: 从 lsu_addr 起始位置取1字节零扩展
-                                3'b100: begin
-                                    wdata <= {24'b0, lsu_rdata[7:0]};
-                                end
-                                // LHU: 从 lsu_addr 起始位置取2字节零扩展（允许非对齐）
-                                3'b101: begin
-                                    wdata <= {16'b0, lsu_rdata[15:0]};
-                                end
-                                default: wen <= 0;
-                            endcase
-                        end
-                        state <= WRITEBACK;
+                    if (opcode == 7'b0000011) begin // 加载指令
+                        case (funct3)
+                            // LB: 从 mem_addr 起始位置取1字节并符号扩展
+                            3'b000: begin
+                                wdata <= {{24{mem_rdata[7]}}, mem_rdata[7:0]};
+                            end
+                            // LH: 从 mem_addr 起始位置取2字节并符号扩展（允许非对齐）
+                            3'b001: begin
+                                wdata <= {{16{mem_rdata[15]}}, mem_rdata[15:0]};
+                            end
+                            // LW: 从 mem_addr 起始位置取4字节（允许非对齐）
+                            3'b010: begin
+                                wdata <= mem_rdata;
+                            end
+                            // LBU: 从 mem_addr 起始位置取1字节零扩展
+                            3'b100: begin
+                                wdata <= {24'b0, mem_rdata[7:0]};
+                            end
+                            // LHU: 从 mem_addr 起始位置取2字节零扩展（允许非对齐）
+                            3'b101: begin
+                                wdata <= {16'b0, mem_rdata[15:0]};
+                            end
+                            default: wen <= 0;
+                        endcase
                     end
-                    // 如果lsu_rvalid为0，继续等待
+                    
+                    state <= WRITEBACK;
                 end
                 
                 WRITEBACK: begin
                     // $display("next_pc=0x%x",next_pc);
-                    
-                    // 清除LSU信号
-                    lsu_req <= 0;
-                    lsu_wen <= 0;
                     
                     // CSR写入逻辑
                     if (csr_wen) begin
