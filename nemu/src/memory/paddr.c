@@ -50,8 +50,45 @@ void init_mem() {
   Log("physical memory area [" FMT_PADDR ", " FMT_PADDR "]", PMEM_LEFT, PMEM_RIGHT);
 }
 
+// ysyxSoC memory support
+#define MROM_BASE 0x20000000
+#define MROM_SIZE 0x1000
+#define SRAM_BASE 0x0f000000
+#define SRAM_SIZE 0x2000
+
+static uint8_t mrom[MROM_SIZE];
+static uint8_t sram[SRAM_SIZE];
+
+static bool in_ysyxsoc(paddr_t addr) {
+  if (addr >= MROM_BASE && addr < MROM_BASE + MROM_SIZE) return true;
+  if (addr >= SRAM_BASE && addr < SRAM_BASE + SRAM_SIZE) return true;
+  return false;
+}
+
+static word_t ysyxsoc_read(paddr_t addr, int len) {
+  if (addr >= MROM_BASE && addr < MROM_BASE + MROM_SIZE) {
+    return host_read(mrom + (addr - MROM_BASE), len);
+  }
+  if (addr >= SRAM_BASE && addr < SRAM_BASE + SRAM_SIZE) {
+    return host_read(sram + (addr - SRAM_BASE), len);
+  }
+  return 0;
+}
+
+static void ysyxsoc_write(paddr_t addr, int len, word_t data) {
+  if (addr >= MROM_BASE && addr < MROM_BASE + MROM_SIZE) {
+    host_write(mrom + (addr - MROM_BASE), len, data);
+    return;
+  }
+  if (addr >= SRAM_BASE && addr < SRAM_BASE + SRAM_SIZE) {
+    host_write(sram + (addr - SRAM_BASE), len, data);
+    return;
+  }
+}
+
 word_t paddr_read(paddr_t addr, int len) {
   if (likely(in_pmem(addr))) return pmem_read(addr, len);
+  if (in_ysyxsoc(addr)) return ysyxsoc_read(addr, len);
   IFDEF(CONFIG_DEVICE, return mmio_read(addr, len));
   out_of_bound(addr);
   return 0;
@@ -59,6 +96,7 @@ word_t paddr_read(paddr_t addr, int len) {
 
 void paddr_write(paddr_t addr, int len, word_t data) {
   if (likely(in_pmem(addr))) { pmem_write(addr, len, data); return; }
+  if (in_ysyxsoc(addr)) { ysyxsoc_write(addr, len, data); return; }
   IFDEF(CONFIG_DEVICE, mmio_write(addr, len, data); return);
   out_of_bound(addr);
 }

@@ -1,103 +1,148 @@
-# ysyx-workbench 使用手册
+# ysyx-workbench 项目说明书
 
-本仓库为 ysyx 学习与实验工作台，集成以下子项目：
-- `abstract-machine`：抽象机和通用库
-- `am-kernels`：AM 上的测试与内核示例
-- `nemu`：教学用模拟器（含 RISC-V 等 ISA）
-- `npc`：自主 CPU（Verilog + Verilator 仿真）
-- `nvboard`：可视化外设与板卡模拟（含示例）
-- `fceux-am`：FCEUX 在 AM 平台的移植
-- `trae_docs`：项目说明与文档
+欢迎使用 **一生一芯 (ysyx)** 学习与实验工作台。本仓库集成了 CPU 设计、模拟器开发、SoC 集成及软件运行时环境的全套工具链。
 
-## 环境准备
-请在 Linux 环境下使用，建议 Ubuntu 20.04+/22.04+。
-需要安装：
-- 基础工具：`git`、`make`、`gcc`/`g++`、`python3`
-- Verilog 仿真：`verilator`
-- 图形/多媒体库：`libsdl2-dev`（部分 NVBoard/FCEUX-AM 场景可能需要）
+详细的技术文档、架构说明和开发指南请参阅：👉 [**ysyx-workbench 开发手册**](docs/ysyx_workbench_manual.md)
 
-示例安装（Ubuntu）：
-```
+## 1. 项目概览
+
+本项目旨在提供一个完整的软硬件协同设计环境，主要包含以下核心组件：
+- **NPC (New Processor Core)**: 基于 Verilog/Chisel 设计的 RISC-V 处理器核心。
+- **NEMU (NJU Emulator)**: 作为参考模型（Ref Model）的教学用 RISC-V 模拟器。
+- **Abstract Machine (AM)**: 裸机编程的硬件抽象层，实现 "Write Once, Run Anywhere"。
+- **ysyxSoC**: 基于 Chisel/Scala 的 SoC 集成框架，包含总线与外设集成。
+- **NVBoard**: 虚拟 FPGA 开发板，提供 VGA、键盘、开关等外设的可视化模拟。
+
+## 2. 目录结构详解
+
+| 目录名 | 详细说明 |
+| :--- | :--- |
+| **`abstract-machine/`** | **抽象机 (Abstract Machine)**<br>屏蔽了底层硬件细节的软件开发层。包含：<br>- `klib`: 通用 C 库 (string, stdio 等)。<br>- `am`: 架构相关的运行时实现 (trm, ioe 等)。<br>- `scripts`: 编译构建脚本，定义了不同架构的编译选项。 |
+| **`am-kernels/`** | **AM 程序集**<br>基于 AM 运行的各种软件程序。<br>- `tests/cpu-tests`: 基础 CPU 指令测试 (add, shift 等)。<br>- `tests/am-tests`: AM 功能测试 (video, keyboard 等)。<br>- `benchmarks`: 性能测试基准 (coremark, dhrystone)。 |
+| **`nemu/`** | **NEMU 模拟器**<br>教学用的高性能 RISC-V 解释器。通常作为“黄金模型 (Ref Model)”与 NPC 进行 DiffTest (差分测试)，用于验证 NPC 的正确性。支持通过 Kconfig 进行功能剪裁。 |
+| **`npc/`** | **处理器设计 (New Processor Core)**<br>你自己的 CPU 设计目录。<br>- `vsrc/`: Verilog/SystemVerilog 源码。<br>- `csrc/`: C++ 仿真顶层，基于 Verilator 构建仿真环境。<br>- `build/`: 编译产物，包含波形文件 `dump.vcd`。 |
+| **`nvboard/`** | **虚拟板卡 (NVBoard)**<br>基于 SDL2 的可视化硬件模拟库。它模拟了 FPGA 开发板上的 LED、数码管、拨码开关、VGA 接口等，让你在没有实物板卡的情况下也能看到硬件效果。 |
+| **`ysyxSoC/`** | **SoC 集成**<br>基于 Chisel/Scala 构建的 SoC 顶层与互联架构。包含 AXI4 总线、Crossbar、UART/SPI 控制器等。这是将 NPC 接入真实总线环境的地方。 |
+| **`fceux-am/`** | **FC 模拟器**<br>移植到 AM 平台的红白机 (NES) 模拟器。可以编译运行在 NEMU 或你的 NPC 上，用来玩《超级玛丽》等游戏。 |
+| **`docs/`** | **项目文档**<br>存放技术手册、开发指南和说明文档。核心文件为 [ysyx_workbench_manual.md](docs/ysyx_workbench_manual.md)。 |
+
+## 3. 安装与环境配置
+
+推荐环境：**Ubuntu 20.04/22.04 LTS** (WSL2 或原生 Linux)
+
+### 3.1 基础依赖安装
+
+```bash
 sudo apt update
-sudo apt install -y git make gcc g++ python3 verilator libsdl2-dev
+sudo apt install -y git build-essential make gcc g++ python3 \
+    verilator libsdl2-dev libreadline-dev llvm-11 llvm-11-dev
 ```
+*注：`verilator` 版本建议 4.200 以上。*
 
-## 初始化
-执行根目录初始化脚本（可选）：
-```
+### 3.2 环境变量初始化
+
+仓库根目录提供了 `init.sh` 脚本来辅助环境配置（主要是设置 `*_HOME` 环境变量）。
+
+```bash
+# 执行初始化 (根据提示操作)
 bash init.sh
 ```
-该脚本用于准备部分依赖或环境变量（如无特殊需求，可跳过）。
 
-## 快速上手
-以下为常用子项目的构建与运行示例，具体命令以各目录内 README/Makefile 为准。
-
-### 1) 在 NEMU 上运行 AM 测试
-进入 AM 测试目录并选择 RISC-V NEMU 作为运行平台：
+手动配置（如需写入 `~/.bashrc`）：
+```bash
+export NEMU_HOME=/path/to/ysyx-workbench/nemu
+export AM_HOME=/path/to/ysyx-workbench/abstract-machine
+export NPC_HOME=/path/to/ysyx-workbench/npc
+export NVBOARD_HOME=/path/to/ysyx-workbench/nvboard
 ```
+配置完成后，请执行 `source ~/.bashrc` 使其生效。
+
+## 4. 快速上手与运行指南
+
+### 4.1 编译与运行 NEMU
+
+NEMU 是开发初期的黄金标准。
+
+```bash
+cd nemu
+make menuconfig  # 配置 ISA (如 riscv32)
+make -j
+```
+
+### 4.2 在 NEMU 上运行 AM 测试
+
+验证 NEMU 是否正常工作，可以运行 AM 中的测试程序。
+
+```bash
 cd am-kernels/tests/am-tests
+# 编译并运行 (ARCH 指定架构与平台)
 make ARCH=riscv32-nemu run
 ```
-- 运行后进入 NEMU 监控器，常用命令：`c` 继续、`q` 退出。
-- 可通过 `mainargs=<arg>` 为程序传参，例如：
-```
-make ARCH=riscv32-nemu mainargs=y run
-```
+*   **常用参数**：
+    *   `mainargs=hello`：向程序传递参数（例如运行 hello 测试）。
+    *   `batch=on`：批处理模式（不进入调试 shell）。
 
-### 2) 构建与运行 NEMU
-```
-cd nemu
-make -j
-# 构建完成后，可结合 am-kernels 的 run 目标运行程序
-```
-NEMU 使用 Kconfig/Makefile 构建体系，更多细节参考 `nemu/README.md`。
+### 4.3 开发与仿真 NPC (Verilator)
 
-### 3) 构建与运行 NPC（Verilator 仿真）
-```
-cd npc
-make -j
-# 生成可执行位于 build/ 目录（如 build/top），不同工程可能提供 run 目标
-```
-建议先阅读 `npc/README.md` 与 `npc/Makefile` 了解工程入口与仿真参数。
+NPC 是你设计的 CPU。目前的仿真框架基于 Verilator。
 
-### 4) 体验 NVBoard 示例
+**运行 Hello World 测试：**
+```bash
+# 在 am-tests 目录下发起运行，目标架构设为 riscv32e-npc (假设你实现了该架构)
+cd am-kernels/tests/am-tests
+make ARCH=riscv32e-npc mainargs=h run
 ```
+该命令会自动编译你的 NPC RTL 代码和 C++ 仿真环境，并加载测试程序运行。
+
+**NPC 目录说明 (`npc/`)：**
+*   `vsrc/`：存放 Verilog/SystemVerilog 源码。
+*   `csrc/`：存放 C++ 仿真顶层 (Testbench)，包含 `main.cpp` (入口), `loop.cpp` (仿真循环), `program.cpp` (程序加载)。
+*   `build/`：编译产物与波形文件 (`dump.vcd`)。
+
+### 4.4 体验 NVBoard 可视化
+
+NVBoard 让你可以在没有物理 FPGA 的情况下看到流水灯、数码管等效果。
+
+```bash
 cd nvboard/example
-make -j
-# 如有提供 run 目标：
 make run
 ```
-NVBoard 用于按键/拨码/LED/VGA 等外设的可视化交互，更多使用方法见 `nvboard/README.md`。
 
-### 5) 构建 fceux-am
+### 4.5 ysyxSoC (Chisel/Scala)
+
+如果你关注 SoC 总线集成：
+
+```bash
+cd ysyxSoC
+# 需要安装 Mill 构建工具 (目录内已包含 mill 脚本)
+./mill -i ysyxsoc.compile
 ```
-cd fceux-am
-make -j
-```
-该项目在 AM 平台上运行 FCEUX 内核，依赖在目录内的资源与源代码，具体功能与运行方式请参考 `fceux-am/README.md`。
+*IDE 支持：推荐使用 VS Code + Scala (Metals) 插件。*
 
-## 目录结构速览
-- `abstract-machine/` 抽象机与通用库
-- `am-kernels/` AM 上的测试与内核示例
-- `nemu/` 教学模拟器
-- `npc/` 自研 CPU 工程
-- `nvboard/` 可视化板卡/外设模拟（含示例）
-- `fceux-am/` FCEUX-AM 工程
-- `trae_docs/` 文档与说明
+## 5. 常见问题 (FAQ)
 
-## 常见问题
-- 若遇到三方库缺失，请安装相应开发包（如 `libsdl2-dev`）。
-- 若 `make` 报错，请先清理再重试：`make clean` 或删除 `build/` 后重新构建。
-- 本仓库已将 `am-kernels`、`fceux-am`、`nvboard` 作为普通目录管理，非子模块。若需要以子模块管理，请按需在独立仓库中创建并使用 `git submodule add`。
+1.  **编译报错 `fatal error: SDL2/SDL.h: No such file`**
+    *   原因：缺少 SDL2 开发库。
+    *   解决：`sudo apt install libsdl2-dev`
 
-## 开发流程
-- 提交改动：
-```
-git add .
-git commit -m "<描述你的改动>"
-git push
-```
-- 分支协作：默认分支为 `main`，如需创建特性分支：`git checkout -b feature/<name>`。
+2.  **Verilator 版本过低**
+    *   APT 源里的 Verilator 可能较旧。如遇兼容性问题，建议从源码编译安装 Verilator 4.200+。
 
-## 许可证
-各子项目目录内附带相应 LICENSE，请按其条款使用。
+3.  **如何开启波形调试？**
+    *   在 NPC 仿真中，波形通常生成在 `npc/build/dump.vcd`。
+    *   使用 GTKWave 打开：`gtkwave npc/build/dump.vcd`。
+
+4.  **Makefile 修改**
+    *   项目通过 `Makefile` 组织构建。主要逻辑位于 `abstract-machine/scripts` 和各子项目的 `Makefile` 中。如需修改编译选项，请查看相应文档。
+
+## 6. 版本控制
+
+*   **提交代码**：养成良好的 Git 习惯。
+    ```bash
+    git add .
+    git commit -m "feat: implement instruction addi"
+    ```
+*   **分支管理**：建议在独立分支上开发新特性。
+
+---
+*Generated by Gemini CLI for ysyx-workbench*

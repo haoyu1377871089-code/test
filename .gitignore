@@ -1,15 +1,46 @@
-*.*
-*
-!*/
-!/nemu/*
-!/nexus-am/*
-!/nanos-lite/*
-!/navy-apps/*
-!/npc/*
-!Makefile
-!README.md
-!.gitignore
-!init.sh
-!/nvboard/*
-!/am-kernels/*
-!/fceux-am/*
+# Build artifacts
+build/
+obj_dir/
+out/
+work/
+
+# Compilation Artifacts
+*.o
+*.d
+*.a
+*.so
+*.dylib
+*.dll
+*.elf
+*.bin
+*.hex
+*.map
+*.log
+*.vcd
+compile_commands.json
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.metals/
+.bloop/
+.bsp/
+.cache/
+
+# Python
+__pycache__/
+*.pyc
+
+# Backups
+*_backup_*/
+npc_backup_*/
+*.bak
+*.old
+
+# Specific generated files
+tags
+cscope.out

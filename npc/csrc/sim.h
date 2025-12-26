@@ -15,6 +15,10 @@ static constexpr uint32_t FB_ADDR     = 0xa1000000;
 // 仿真内存基址与大小
 static constexpr uint32_t CONFIG_MBASE = 0x80000000;
 static constexpr uint32_t CONFIG_MSIZE = 128 * 1024 * 1024;
+static constexpr uint32_t CONFIG_FLASH_BASE = 0x30000000;
+static constexpr uint32_t CONFIG_FLASH_SIZE = 16 * 1024 * 1024;
+static constexpr uint32_t CONFIG_SRAM_BASE = 0x0f000000;
+static constexpr uint32_t CONFIG_SRAM_SIZE = 8 * 1024;
 
 // 来自 program.cpp 的全局指令映射
 extern std::map<uint32_t, uint32_t> pc_inst;

@@ -10,3 +10,5 @@
 !.gitignore
 !README.md
 build/
+obj_dir/
+build_soc/

@@ -1,7 +1,7 @@
 TOPNAME = top
 # 头文件名称
 NXDC_FILES = constr/top.nxdc
-INC_PATH ?=
+INC_PATH ?= $(abspath ./vsrc/core) $(abspath ./vsrc/perip)
 IMG ?=
 # 定义一个可选的头文件搜索变量
 GTKWAVE      ?= gtkwave         

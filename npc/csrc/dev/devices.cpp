@@ -17,7 +17,7 @@ typedef struct { void *start, *end; } Area;
 #include "devices.h"
 
 // 设备地址定义
-#define SERIAL_PORT  0xa00003f8
+#define SERIAL_PORT  0x10000000
 #define VGACTL_ADDR  0xa0000100
 #define KBD_ADDR     0xa0000060
 #define RTC_ADDR     0xa0000048
@@ -250,8 +250,9 @@ uint32_t read(uint32_t raddr) {
 
 void write(uint32_t waddr, uint32_t wdata, uint8_t wmask) {
   if (waddr == SERIAL_PORT) {
-    putchar(wdata & 0xff);
-    fflush(stdout);
+    // fprintf(stderr, "%c", wdata & 0xff);
+    // putchar(wdata & 0xff);
+    // fflush(stdout);
     return;
   }
   if (waddr == SYNC_ADDR) {
@@ -274,6 +275,7 @@ void write(uint32_t waddr, uint32_t wdata, uint8_t wmask) {
 }
 
 bool request_exit() { return sim_exit.load(); }
+void force_exit() { sim_exit.store(true); }
 void set_exit_after_frames(int n) { if (n > 0) exit_after_frames = n; }
 
 } // namespace devices

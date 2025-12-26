@@ -12,5 +12,6 @@ namespace devices {
 
   // 自动退出控制
   bool request_exit();
+  void force_exit();
   void set_exit_after_frames(int n);
 }
