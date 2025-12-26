@@ -25,14 +25,16 @@ SECTIONS {
     _data = .;
     *(.data*)
     *(.sdata*)
+    . = ALIGN(4);
     _edata = .;
   } > sram : data
 
   .bss : {
-_bss_start = .;
+    _bss_start = .;
     *(.bss*)
     *(.sbss*)
     *(.scommon)
+    . = ALIGN(4);
     _bss_end = .;
   } > sram
   

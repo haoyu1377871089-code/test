@@ -1,6 +1,6 @@
 `include "axi4_lite_interface.vh"
 
-module IFU_SRAM (
+module IFU_AXI (
     input clk,
     input rst,
     

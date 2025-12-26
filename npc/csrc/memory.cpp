@@ -177,10 +177,13 @@ extern "C" void pmem_load_binary(const char* filename, uint32_t start_addr) {
       printf("已加载镜像到 PMEM: %s (0x%08x)\n", filename, start_addr);
   } else if (in_mrom(start_addr)) {
       uint32_t offset = start_addr - 0x20000000;
+      if (size > 1024 * 1024) { // Larger than 1MB
+          fseek(fp, 0x11000000, SEEK_SET); // Skip the gap (0x20000000 - 0x0f000000)
+          size -= 0x11000000;
+          printf("检测到巨型镜像，跳过空洞。实际加载大小: %ld 字节\n", size);
+      }
       if (offset + size > mrom.size()) {
-          printf("错误: 镜像大小超过 MROM 容量\n");
-          fclose(fp);
-          return;
+          mrom.resize(offset + size);
       }
       if (fread(mrom.data() + offset, size, 1, fp) != 1) {
           printf("错误: 读取文件失败\n");

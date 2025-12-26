@@ -1,6 +1,6 @@
 `include "axi4_lite_interface.vh"
 
-module LSU_SRAM (
+module LSU_AXI (
     input clk,
     input rst,
     
@@ -116,7 +116,10 @@ always @(posedge clk or posedge rst) begin
     rready <= 1'b0;
   end else begin
     // 第一级流水线：保存请求信息
-    addr_stage1 <= addr;
+    // 仅在发起新请求时更新地址，防止在等待总线响应期间地址变化
+    if (req && !arvalid && !awvalid && !rvalid_out) begin
+        addr_stage1 <= addr;
+    end
     req_stage1 <= req;
     wen_stage1 <= wen;
     in_dmem_stage1 <= in_dmem;
@@ -131,9 +134,19 @@ always @(posedge clk or posedge rst) begin
       rdata_out <= dmem_rdata2;
       rvalid_out <= 1'b1;
     end else if (rvalid && rready) begin
-      // AXI 读操作完成 (异步)
-      rdata_out <= rdata;
+      // AXI 读完成
+      // 根据地址低2位对齐读数据 (RV32E 小端序)
+      // addr_stage1 是上一拍保存的请求地址
+      case (addr_stage1[1:0])
+        2'b00: rdata_out <= rdata;
+        2'b01: rdata_out <= {8'b0, rdata[31:8]};
+        2'b10: rdata_out <= {16'b0, rdata[31:16]};
+        2'b11: rdata_out <= {24'b0, rdata[31:24]};
+      endcase
       rvalid_out <= 1'b1;
+      rready <= 1'b0;
+    end else begin
+      rvalid_out <= 1'b0;
     end
     
     // 写操作：立即处理，不延迟
@@ -150,36 +163,48 @@ always @(posedge clk or posedge rst) begin
       dmem_wen <= 1'b0;
     end
     
-    // AXI4-Lite握手信号（简化处理，立即响应）
-    // 写地址通道
-    if (req && wen && !in_dmem) begin
-      awaddr <= addr;
-      awvalid <= 1'b1;
-    end else if (awvalid && awready) begin
-      awvalid <= 1'b0;
-    end
-    
-    // 写数据通道
-    if (req && wen && !in_dmem) begin
-      wdata_axi <= wdata;
-      wstrb <= wmask;
-      wvalid <= 1'b1;
-      bready <= 1'b1;
-    end else if (wvalid && wready) begin
-      wvalid <= 1'b0;
-    end else if (bvalid && bready) begin
-      bready <= 1'b0;
-    end
-    
-    // 读地址通道
-    if (req && !wen && !in_dmem) begin
-      araddr <= addr;
-      arvalid <= 1'b1;
-      rready <= 1'b1;
-    end else if (arvalid && arready) begin
-      arvalid <= 1'b0;
-    end else if (rvalid && rready) begin
-      rready <= 1'b0;
+    // AXI4-Lite Control Logic
+    // Check if idle (no pending transactions and no completion pulse active)
+    if (!awvalid && !wvalid && !bready && !arvalid && !rready && !rvalid_out) begin
+        // IDLE: Accept new request
+        if (req && !in_dmem) begin
+            if (wen) begin
+                awaddr <= addr; awvalid <= 1'b1;
+                wdata_axi <= wdata; wstrb <= wmask; wvalid <= 1'b1;
+                bready <= 1'b1;
+            end else begin
+                araddr <= addr; arvalid <= 1'b1;
+                rready <= 1'b1;
+            end
+        end
+    end else begin
+        // BUSY: Handle Handshakes
+        // Write Address
+        if (awvalid && awready) awvalid <= 1'b0;
+        // Write Data
+        if (wvalid && wready) wvalid <= 1'b0;
+        // Write Response
+        if (bvalid && bready && !awvalid && !wvalid) begin
+            bready <= 1'b0;
+            rvalid_out <= 1'b1; // Write Done
+        end
+        
+        // Read Address
+        if (arvalid && arready) arvalid <= 1'b0;
+        // Read Data
+        if (rvalid && rready) begin
+            rready <= 1'b0;
+            // Align data based on the address used for the request
+            case (araddr[1:0])
+                2'b00: rdata_out <= rdata;
+                2'b01: rdata_out <= {8'b0, rdata[31:8]};
+                2'b10: rdata_out <= {16'b0, rdata[31:16]};
+                2'b11: rdata_out <= {24'b0, rdata[31:24]};
+            endcase
+            rvalid_out <= 1'b1; // Read Done
+        end else begin
+            rvalid_out <= 1'b0;
+        end
     end
   end
 end

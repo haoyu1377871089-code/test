@@ -217,8 +217,8 @@ module ysyx_00000000 (
         .regs        (exu_regs)
     );
 
-    // IFU_SRAM
-    IFU_SRAM u_ifu (
+    // IFU_AXI
+    IFU_AXI u_ifu (
         .clk         (clk),
         .rst         (rst),
         .req         (ifu_req),
@@ -244,8 +244,8 @@ module ysyx_00000000 (
         .rready      (ifu_rready)
     );
 
-    // LSU_SRAM
-    LSU_SRAM u_lsu (
+    // LSU_AXI
+    LSU_AXI u_lsu (
         .clk         (clk),
         .rst         (rst),
         .req         (lsu_req),

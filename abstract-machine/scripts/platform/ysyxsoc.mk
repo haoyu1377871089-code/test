@@ -6,7 +6,11 @@ LDSCRIPTS += $(AM_HOME)/scripts/linker_ysyxsoc.ld
 LDFLAGS   += --gc-sections -e _start
 
 $(IMAGE).bin: $(IMAGE).elf
-	@$(OBJCOPY) -S -O binary --gap-fill 0xff $< $@
+	@$(OBJCOPY) -S -j .text -j .rodata -j .data -O binary $< $@
 
 image: $(IMAGE).bin
 
+NPC_SOC_BIN = $(NPC_HOME)/build_soc/ysyxSoCFull
+
+run: image
+	$(NPC_SOC_BIN) $(IMAGE).bin
