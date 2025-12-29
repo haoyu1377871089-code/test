@@ -250,9 +250,9 @@ uint32_t read(uint32_t raddr) {
 
 void write(uint32_t waddr, uint32_t wdata, uint8_t wmask) {
   if (waddr == SERIAL_PORT) {
-    // fprintf(stderr, "%c", wdata & 0xff);
-    putchar(wdata & 0xff);
-    fflush(stdout);
+    // 禁用仿真器的"上帝视角"打印，强制字符输出依赖于 Verilog 硬件逻辑
+    // putchar(wdata & 0xff);
+    // fflush(stdout);
     return;
   }
   if (waddr == SYNC_ADDR) {

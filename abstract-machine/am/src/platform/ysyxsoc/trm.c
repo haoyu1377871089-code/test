@@ -9,26 +9,39 @@ int main(const char *args);
 Area heap = RANGE(&_heap_start, (char *)&_stack_pointer - STACK_SIZE);
 
 #define UART_BASE 0x10000000L
-#define UART_TX   0
-#define UART_LSR  5
-#define UART_LCR  3
-#define UART_DLL  0
-#define UART_DLM  1
+// UART 16550 寄存器偏移 - ysyxSoC 使用 4 字节对齐
+#define UART_TX   (0 * 4)   // 发送寄存器 / 接收缓冲
+#define UART_LSR  (5 * 4)   // 行状态寄存器
+#define UART_LCR  (3 * 4)   // 行控制寄存器
+#define UART_DLL  (0 * 4)   // 除数锁存器低字节 (DLAB=1)
+#define UART_DLM  (1 * 4)   // 除数锁存器高字节 (DLAB=1)
 
 void uart_init() {
+  // 确保足够的延迟让硬件稳定
+  for (volatile int i = 0; i < 1000; i++);
+  
+  // Set DLAB=1 to access divisor registers (LCR bit 7)
   *(volatile uint8_t *)(UART_BASE + UART_LCR) = 0x80; 
   for (volatile int i = 0; i < 1000; i++);
+  
+  // Set divisor = 1 for maximum baud rate
+  // dl > 0 is required for enable signal
   *(volatile uint8_t *)(UART_BASE + UART_DLL) = 0x01;
-  for (volatile int i = 0; i < 1000; i++);
+  for (volatile int i = 0; i < 500; i++);
   *(volatile uint8_t *)(UART_BASE + UART_DLM) = 0x00;
-  for (volatile int i = 0; i < 1000; i++);
+  for (volatile int i = 0; i < 500; i++);
+  
+  // Clear DLAB, set 8N1 format (8 data bits, no parity, 1 stop bit)
   *(volatile uint8_t *)(UART_BASE + UART_LCR) = 0x03;
   for (volatile int i = 0; i < 1000; i++);
 }
 
 void putch(char ch) {
+  // 等待发送器准备好 (THRE=1 表示 TX FIFO 为空)
   while ((*(volatile uint8_t *)(UART_BASE + UART_LSR) & 0x20) == 0);
-  *(volatile char *)(UART_BASE + UART_TX) = ch;
+  
+  // Write character to TX register
+  *(volatile uint8_t *)(UART_BASE + UART_TX) = ch;
 }
 
 void halt(int code) {
