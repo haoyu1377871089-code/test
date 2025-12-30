@@ -134,7 +134,8 @@ extern "C" void pmem_write(uint32_t waddr, uint32_t wdata, uint8_t wmask) {
   devices::write(waddr, wdata, wmask);
   
   // 检查是否是设备地址范围（简化检查）
-  if ((waddr >= 0xa0000000 && waddr < 0xa2000000) || (waddr >= 0x10000000 && waddr < 0x10001000)) {
+  // 包括: 设备区域 0xa0000000-0xa2000000, UART 0x10000000-0x10001000, SPI 0x10001000-0x10002000
+  if ((waddr >= 0xa0000000 && waddr < 0xa2000000) || (waddr >= 0x10000000 && waddr < 0x10002000)) {
     // 属于设备地址范围，设备模块已处理
     return;
   }
