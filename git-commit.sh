@@ -1,30 +1,22 @@
 #!/bin/bash
 
-# 自动Git提交脚本
+# 自动Git提交脚本 (支持嵌套仓库)
 # 用法: ./git-commit.sh [提交信息]
 
 set -e
 
-cd "$(dirname "$0")"
+WORKSPACE="$(dirname "$0")"
+cd "$WORKSPACE"
 
-# 检查是否有未提交的更改
-if git diff --quiet && git diff --cached --quiet; then
-    echo "没有需要提交的更改"
-    exit 0
-fi
-
-# 显示当前状态
-echo "=== Git 状态 ==="
-git status --short
+# 嵌套仓库列表 (这些目录有独立的 .git)
+NESTED_REPOS=("ysyxSoC")
 
 # 获取提交信息
 if [ -n "$1" ]; then
     COMMIT_MSG="$*"
 else
-    # 生成默认提交信息：日期 + 简短描述
     DATE=$(date "+%Y-%m-%d %H:%M")
     COMMIT_MSG="Update: $DATE"
-    echo ""
     echo "使用默认提交信息: $COMMIT_MSG"
     echo "或输入自定义信息 (直接回车使用默认):"
     read -r USER_MSG
@@ -33,23 +25,55 @@ else
     fi
 fi
 
-# 添加所有更改
-echo ""
-echo "=== 添加所有更改 ==="
-git add -A
-git status --short
+# 处理嵌套仓库
+for repo in "${NESTED_REPOS[@]}"; do
+    if [ -d "$WORKSPACE/$repo/.git" ]; then
+        echo ""
+        echo "=== 处理嵌套仓库: $repo ==="
+        cd "$WORKSPACE/$repo"
+        
+        if git diff --quiet && git diff --cached --quiet; then
+            echo "$repo: 没有需要提交的更改"
+        else
+            git status --short
+            git add -A
+            git commit -m "$COMMIT_MSG"
+            echo "$repo: 已提交"
+        fi
+        cd "$WORKSPACE"
+    fi
+done
 
-# 提交
+# 处理主仓库
 echo ""
-echo "=== 提交 ==="
-git commit -m "$COMMIT_MSG"
+echo "=== 处理主仓库 ==="
+cd "$WORKSPACE"
+
+if git diff --quiet && git diff --cached --quiet; then
+    echo "主仓库: 没有需要提交的更改"
+else
+    git status --short
+    git add -A
+    git commit -m "$COMMIT_MSG"
+    echo "主仓库: 已提交"
+fi
 
 # 询问是否推送
 echo ""
-echo "是否推送到远程仓库? (y/N)"
+echo "是否推送所有仓库到远程? (y/N)"
 read -r PUSH_CONFIRM
 if [ "$PUSH_CONFIRM" = "y" ] || [ "$PUSH_CONFIRM" = "Y" ]; then
-    echo "=== 推送 ==="
+    # 推送嵌套仓库
+    for repo in "${NESTED_REPOS[@]}"; do
+        if [ -d "$WORKSPACE/$repo/.git" ]; then
+            echo "推送 $repo..."
+            cd "$WORKSPACE/$repo"
+            git push 2>/dev/null || echo "$repo: 推送失败或无远程仓库"
+            cd "$WORKSPACE"
+        fi
+    done
+    # 推送主仓库
+    echo "推送主仓库..."
     git push
     echo "推送完成!"
 fi

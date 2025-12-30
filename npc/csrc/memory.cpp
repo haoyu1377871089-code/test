@@ -38,6 +38,9 @@ static inline bool in_mrom(uint32_t addr) {
 #define FLASH_TEST_MAGIC   0xDEADBEEF
 #define FLASH_TEST_PATTERN_COUNT 16
 
+// char-test 存储位置
+#define FLASH_CHAR_TEST_OFFSET 0x00200000  // 2MB 偏移
+
 static uint32_t flash_test_patterns[FLASH_TEST_PATTERN_COUNT] = {
     0xDEADBEEF, 0xCAFEBABE, 0x12345678, 0xABCDEF00,
     0x11111111, 0x22222222, 0x33333333, 0x44444444,
@@ -58,6 +61,34 @@ extern "C" void flash_init_test_data() {
     flash[offset + 3] = (data >> 24) & 0xFF;
   }
   printf("Flash test data initialized at offset 0x%08x (16 patterns)\n", FLASH_TEST_OFFSET);
+}
+
+extern "C" void flash_load_program(const char* filename, uint32_t flash_offset) {
+  if (flash.empty()) flash.resize(CONFIG_FLASH_SIZE);
+  
+  FILE* fp = fopen(filename, "rb");
+  if (fp == NULL) {
+    printf("Flash: 无法打开文件 %s\n", filename);
+    return;
+  }
+  
+  fseek(fp, 0, SEEK_END);
+  long size = ftell(fp);
+  fseek(fp, 0, SEEK_SET);
+  
+  if (flash_offset + size > CONFIG_FLASH_SIZE) {
+    printf("Flash: 程序太大，超出 Flash 容量\n");
+    fclose(fp);
+    return;
+  }
+  
+  if (fread(flash.data() + flash_offset, size, 1, fp) != 1) {
+    printf("Flash: 读取文件失败\n");
+  } else {
+    printf("Flash: 已加载 %s 到偏移 0x%08x (%ld 字节)\n", filename, flash_offset, size);
+  }
+  
+  fclose(fp);
 }
 
 extern "C" void flash_read(int addr, int *data) {

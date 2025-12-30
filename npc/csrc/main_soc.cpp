@@ -2,18 +2,24 @@
 #include "verilated.h"
 #include "verilated_vcd_c.h"
 #include <iostream>
+#include <cstring>
 #include "sim.h"
 
 extern "C" void pmem_load_binary(const char* filename, uint32_t start_addr);
 extern "C" void flash_init_test_data();
+extern "C" void flash_load_program(const char* filename, uint32_t flash_offset);
 extern "C" bool npc_request_exit();
+
+// char-test 在 Flash 中的偏移地址
+#define FLASH_CHAR_TEST_OFFSET 0x00200000
 
 int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(true);
 
     if (argc < 2) {
-        std::cout << "Usage: " << argv[0] << " <image>" << std::endl;
+        std::cout << "Usage: " << argv[0] << " <image> [flash_program]" << std::endl;
+        std::cout << "  flash_program: optional binary to load into Flash at 2MB offset" << std::endl;
         return 0;
     }
     const char* imgPath = argv[1];
@@ -24,8 +30,9 @@ int main(int argc, char **argv) {
     // Initialize flash test data for verification
     flash_init_test_data();
 
+    // 加载额外的程序到 Flash
     if (argc > 2) {
-        pmem_load_binary(argv[2], 0x30000000);
+        flash_load_program(argv[2], FLASH_CHAR_TEST_OFFSET);
     }
 
     VysyxSoCFull *top = new VysyxSoCFull;
