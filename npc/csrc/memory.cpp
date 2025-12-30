@@ -32,6 +32,34 @@ static inline bool in_mrom(uint32_t addr) {
   return addr >= 0x20000000 && addr < 0x20000000 + 4096;
 }
 
+// Flash 测试模式数据 - 供测试程序验证
+// 这些数据会在仿真初始化时写入 Flash 的特定偏移位置
+#define FLASH_TEST_OFFSET  0x00100000  // 测试数据从 1MB 偏移开始 (绝对地址 0x30100000)
+#define FLASH_TEST_MAGIC   0xDEADBEEF
+#define FLASH_TEST_PATTERN_COUNT 16
+
+static uint32_t flash_test_patterns[FLASH_TEST_PATTERN_COUNT] = {
+    0xDEADBEEF, 0xCAFEBABE, 0x12345678, 0xABCDEF00,
+    0x11111111, 0x22222222, 0x33333333, 0x44444444,
+    0x55555555, 0x66666666, 0x77777777, 0x88888888,
+    0x99999999, 0xAAAAAAAA, 0xBBBBBBBB, 0xCCCCCCCC
+};
+
+extern "C" void flash_init_test_data() {
+  if (flash.empty()) flash.resize(CONFIG_FLASH_SIZE);
+  
+  // 写入测试模式数据到 Flash
+  for (int i = 0; i < FLASH_TEST_PATTERN_COUNT; i++) {
+    uint32_t offset = FLASH_TEST_OFFSET + i * 4;
+    uint32_t data = flash_test_patterns[i];
+    flash[offset + 0] = (data >> 0) & 0xFF;
+    flash[offset + 1] = (data >> 8) & 0xFF;
+    flash[offset + 2] = (data >> 16) & 0xFF;
+    flash[offset + 3] = (data >> 24) & 0xFF;
+  }
+  printf("Flash test data initialized at offset 0x%08x (16 patterns)\n", FLASH_TEST_OFFSET);
+}
+
 extern "C" void flash_read(int addr, int *data) {
   if (flash.empty()) flash.resize(CONFIG_FLASH_SIZE);
   
@@ -41,7 +69,7 @@ extern "C" void flash_read(int addr, int *data) {
                 ((uint32_t)flash[addr+1] << 8) |
                 ((uint32_t)flash[addr+2] << 16) |
                 ((uint32_t)flash[addr+3] << 24);
-        printf("Flash read: %08x, data: %08x\n", addr, *data);
+        // printf("Flash read: %08x, data: %08x\n", addr, *data);
         return;
       }
   }

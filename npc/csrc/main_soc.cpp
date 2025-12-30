@@ -5,6 +5,7 @@
 #include "sim.h"
 
 extern "C" void pmem_load_binary(const char* filename, uint32_t start_addr);
+extern "C" void flash_init_test_data();
 extern "C" bool npc_request_exit();
 
 int main(int argc, char **argv) {
@@ -19,6 +20,9 @@ int main(int argc, char **argv) {
 
     // Load image to MROM (0x20000000)
     pmem_load_binary(imgPath, 0x20000000);
+
+    // Initialize flash test data for verification
+    flash_init_test_data();
 
     if (argc > 2) {
         pmem_load_binary(argv[2], 0x30000000);
