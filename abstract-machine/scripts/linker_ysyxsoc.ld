@@ -2,21 +2,23 @@ ENTRY(_start)
 PHDRS { text PT_LOAD; data PT_LOAD; }
 
 MEMORY {
-  mrom : ORIGIN = 0x20000000, LENGTH = 4K
-  sram : ORIGIN = 0x0f000000, LENGTH = 8K
+  /* Flash XIP: 程序通过 XIP 方式从 Flash 执行 */
+  flash : ORIGIN = 0x30000000, LENGTH = 16M
+  /* SRAM: 数据段、BSS、堆栈 */
+  sram  : ORIGIN = 0x0f000000, LENGTH = 8K
 }
 
 SECTIONS {
-  . = ORIGIN(mrom);
+  . = ORIGIN(flash);
   .text : {
     *(entry)
     *(.text*)
-  } > mrom : text
+  } > flash : text
   etext = .;
   _etext = .;
   .rodata : {
     *(.rodata*)
-  } > mrom : text
+  } > flash : text
 
   . = ALIGN(4);
   _data_load_addr = .;

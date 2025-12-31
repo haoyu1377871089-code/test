@@ -84,8 +84,50 @@ extern char _edata;
 extern char _bss_start;
 extern char _bss_end;
 
+// 读取CSR寄存器
+static inline uint32_t csrr_mvendorid() {
+  uint32_t val;
+  asm volatile("csrr %0, mvendorid" : "=r"(val));
+  return val;
+}
+
+static inline uint32_t csrr_marchid() {
+  uint32_t val;
+  asm volatile("csrr %0, marchid" : "=r"(val));
+  return val;
+}
+
+// 输出十六进制数
+static void print_hex(uint32_t val) {
+  putch('0'); putch('x');
+  for (int i = 28; i >= 0; i -= 4) {
+    int digit = (val >> i) & 0xF;
+    putch(digit < 10 ? '0' + digit : 'a' + digit - 10);
+  }
+}
+
 void _trm_init() {
   uart_init();
+  
+  // 输出学号信息
+  uint32_t mvendorid = csrr_mvendorid();
+  uint32_t marchid = csrr_marchid();
+  
+  // 输出 mvendorid
+  putch('m'); putch('v'); putch('e'); putch('n'); putch('d'); putch('o'); putch('r'); putch('i'); putch('d'); putch('=');
+  print_hex(mvendorid);
+  putch(' '); putch('(');
+  // 输出 ASCII 字符 "ysyx"
+  putch((mvendorid >> 24) & 0xFF);
+  putch((mvendorid >> 16) & 0xFF);
+  putch((mvendorid >> 8) & 0xFF);
+  putch(mvendorid & 0xFF);
+  putch(')'); putch('\n');
+  
+  // 输出 marchid
+  putch('m'); putch('a'); putch('r'); putch('c'); putch('h'); putch('i'); putch('d'); putch('=');
+  print_hex(marchid);
+  putch('\n');
   uint32_t *src = (uint32_t *)&_data_load_addr;
   uint32_t *dst = (uint32_t *)&_data;
   uint32_t *end = (uint32_t *)&_edata;

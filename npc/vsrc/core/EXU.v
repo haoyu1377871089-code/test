@@ -113,6 +113,8 @@ module EXU (
             12'h341: csr_rdata = mepc;    // mepc  
             12'h342: csr_rdata = mcause;  // mcause
             12'h300: csr_rdata = mstatus; // mstatus
+            12'hF11: csr_rdata = 32'h79737978; // mvendorid - "ysyx" ASCII
+            12'hF12: csr_rdata = 32'h00000000; // marchid - 学号数字部分 (0)
             default: csr_rdata = 32'h0;
         endcase
     end

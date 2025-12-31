@@ -399,7 +399,7 @@ module ysyx_00000000 (
     // ------------------------------------------------------
     always @(posedge clk or posedge rst) begin
         if (rst) begin
-            pc <= 32'h2000_0000;  // ysyxSoC MROM Entry Point (0x20000000)
+            pc <= 32'h3000_0000;  // Flash XIP Entry Point (0x30000000)
             rdop_en_reg <= 1'b0;
             ex_end_prev <= 1'b0;
             end_flag_reg <= 1'b0;
