@@ -41,7 +41,7 @@ int main(int argc, char **argv) {
 
         top->clock = !top->clock;
         top->eval();
-        tfp->dump(time);
+        if (time < 50000) tfp->dump(time);  // 只保存前50000周期（足够测试）
         time++;
     }
 

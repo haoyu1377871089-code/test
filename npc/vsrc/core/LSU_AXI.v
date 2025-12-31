@@ -46,12 +46,14 @@ module LSU_AXI (
 import "DPI-C" function int unsigned pmem_read(input int unsigned raddr);
 import "DPI-C" function void pmem_write(input int unsigned waddr, input int unsigned wdata, input byte unsigned wmask);
 
-// ========= 数据存储器（DMEM，256x32b，组合读、时序写） =========
+// ========= 数据存储器已禁用，使用外部PSRAM =========
+// 原DMEM范围 0x80000000 - 0x800003FF (1KB) 现在通过AXI访问外部PSRAM
 localparam DMEM_BASE  = 32'h8000_0000;
 localparam DMEM_BYTES = 32'd1024; // 256 * 4 bytes
 wire [31:0] dmem_word_index = ((addr - DMEM_BASE) >> 2);
 wire [7:0]  dmem_idx        = dmem_word_index[7:0];
-wire        in_dmem         = (addr >= DMEM_BASE) && (addr < (DMEM_BASE + DMEM_BYTES));
+// 禁用内部DMEM，所有PSRAM地址都通过AXI访问
+wire        in_dmem         = 1'b0; // (addr >= DMEM_BASE) && (addr < (DMEM_BASE + DMEM_BYTES));
 wire [31:0] dmem_rdata1;
 wire [31:0] dmem_rdata2;
 

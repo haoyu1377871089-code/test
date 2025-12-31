@@ -132,6 +132,8 @@ extern "C" uint32_t pmem_read(uint32_t raddr) {
   if (devv != UINT32_MAX) return devv;
 
   if (in_pmem(raddr) && in_pmem(raddr + 3)) {
+    // 确保 pmem 已初始化
+    if (pmem.empty()) pmem.resize(CONFIG_MSIZE);
     uint32_t offset = raddr - CONFIG_MBASE;
     uint32_t data = 0;
     data |= (uint32_t)pmem[offset];
@@ -172,6 +174,8 @@ extern "C" void pmem_write(uint32_t waddr, uint32_t wdata, uint8_t wmask) {
   }
 
   if (in_pmem(waddr) && in_pmem(waddr + 3)) {
+    // 确保 pmem 已初始化
+    if (pmem.empty()) pmem.resize(CONFIG_MSIZE);
     uint32_t offset = waddr - CONFIG_MBASE;
     for (int i = 0; i < 4; i++) {
       if ((wmask >> i) & 1) {
