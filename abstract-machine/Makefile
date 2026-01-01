@@ -127,7 +127,7 @@ else
 # $(1): library name
 define LIB_TEMPLATE =
 $$(AM_HOME)/$(1)/build/$(1)-$$(ARCH).a: force
-	@$$(MAKE) -s -C $$(AM_HOME)/$(1) archive
+	@$$(MAKE) -s -C $$(AM_HOME)/$(1) archive SRAM_RUN=$$(SRAM_RUN)
 LINKAGE += $$(AM_HOME)/$(1)/build/$(1)-$$(ARCH).a
 endef
 

@@ -74,11 +74,11 @@ module EXU (
     wire [31:0] imm_s_sext = {{20{imm_s[11]}}, imm_s};
     wire [31:0] imm_b_sext = {{19{imm_b[12]}}, imm_b};
     wire [31:0] imm_j_sext = {{11{imm_j[20]}}, imm_j};
-    
+      
     // 存储指令地址偏移（用于字节/半字写入时选择正确的字节位置）
     wire [31:0] store_addr_full = rdata1 + imm_s_sext;
     wire [1:0] store_addr_offset = store_addr_full[1:0];
-    
+      
     // ========== 分支单元 (BRU) ==========
     
     // 指令状态
@@ -351,6 +351,15 @@ module EXU (
                             wen <= 1;
                             state <= WRITEBACK;
                             next_pc <= pc + 4; // 默认PC+4
+                        end
+                        
+                        // MISC-MEM 指令 (FENCE, FENCE.I)
+                        // 在简单实现中，这些指令只需要作为 NOP 处理
+                        // 因为我们是单核顺序执行，没有乱序执行或缓存
+                        7'b0001111: begin
+                            wen <= 0;  // 不写寄存器
+                            next_pc <= pc + 4;
+                            state <= WRITEBACK;
                         end
                         
                         // SYSTEM 指令 (包含 ebreak, ecall, mret, CSR指令)
