@@ -4,8 +4,10 @@ PHDRS { text PT_LOAD; data PT_LOAD; }
 MEMORY {
   /* Flash XIP: 程序通过 XIP 方式从 Flash 执行 */
   flash : ORIGIN = 0x30000000, LENGTH = 16M
-  /* SRAM: 数据段、BSS、堆栈 */
+  /* SRAM: 仅用于栈 */
   sram  : ORIGIN = 0x0f000000, LENGTH = 8K
+  /* PSRAM: 数据段、BSS、堆区 */
+  psram : ORIGIN = 0x80000000, LENGTH = 4M
 }
 
 SECTIONS {
@@ -29,7 +31,7 @@ SECTIONS {
     *(.sdata*)
     . = ALIGN(4);
     _edata = .;
-  } > sram : data
+  } > psram : data
 
   .bss : {
     _bss_start = .;
@@ -38,9 +40,11 @@ SECTIONS {
     *(.scommon)
     . = ALIGN(4);
     _bss_end = .;
-  } > sram
+  } > psram
   
   _heap_start = .;
+  /* 堆区在PSRAM中，可使用剩余空间 */
+  _heap_end = ORIGIN(psram) + LENGTH(psram);
   
   /* Stack at the end of SRAM */
   _stack_pointer = ORIGIN(sram) + LENGTH(sram);

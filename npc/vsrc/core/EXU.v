@@ -75,6 +75,10 @@ module EXU (
     wire [31:0] imm_b_sext = {{19{imm_b[12]}}, imm_b};
     wire [31:0] imm_j_sext = {{11{imm_j[20]}}, imm_j};
     
+    // 存储指令地址偏移（用于字节/半字写入时选择正确的字节位置）
+    wire [31:0] store_addr_full = rdata1 + imm_s_sext;
+    wire [1:0] store_addr_offset = store_addr_full[1:0];
+    
     // ========== 分支单元 (BRU) ==========
     
     // 指令状态
@@ -269,17 +273,31 @@ module EXU (
                         // 存储指令
                         7'b0100011: begin
                             lsu_addr <= rdata1 + imm_s_sext;
-                            lsu_wdata <= rdata2;
                             lsu_req <= 1;
                             lsu_wen <= 1; // 写操作
                             next_pc <= pc + 4; // 默认PC+4
                             case (funct3)
                                 // SB: 写入从 lsu_addr 起始的1字节
-                                3'b000: lsu_wmask <= 4'b0001;
-                                // SH: 写入从 lsu_addr 起始的2字节（允许非对齐）
-                                3'b001: lsu_wmask <= 4'b0011;
-                                // SW: 写入从 lsu_addr 起始的4字节（允许非对齐）
-                                3'b010: lsu_wmask <= 4'b1111;
+                                // 根据地址低2位偏移 wmask 和 wdata
+                                3'b000: begin
+                                    case (store_addr_offset)
+                                        2'b00: begin lsu_wmask <= 4'b0001; lsu_wdata <= rdata2; end
+                                        2'b01: begin lsu_wmask <= 4'b0010; lsu_wdata <= rdata2 << 8; end
+                                        2'b10: begin lsu_wmask <= 4'b0100; lsu_wdata <= rdata2 << 16; end
+                                        2'b11: begin lsu_wmask <= 4'b1000; lsu_wdata <= rdata2 << 24; end
+                                    endcase
+                                end
+                                // SH: 写入从 lsu_addr 起始的2字节
+                                // 根据地址低2位偏移 wmask 和 wdata
+                                3'b001: begin
+                                    case (store_addr_offset)
+                                        2'b00: begin lsu_wmask <= 4'b0011; lsu_wdata <= rdata2; end
+                                        2'b10: begin lsu_wmask <= 4'b1100; lsu_wdata <= rdata2 << 16; end
+                                        default: begin lsu_wmask <= 4'b0011; lsu_wdata <= rdata2; end // 非对齐按对齐处理
+                                    endcase
+                                end
+                                // SW: 写入从 lsu_addr 起始的4字节
+                                3'b010: begin lsu_wmask <= 4'b1111; lsu_wdata <= rdata2; end
                                 default: lsu_req <= 0;
                             endcase
                             state <= WRITEBACK; // 写操作不需要等待

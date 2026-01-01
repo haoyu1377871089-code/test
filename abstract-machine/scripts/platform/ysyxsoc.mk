@@ -6,8 +6,14 @@ CFLAGS    += -fdata-sections -ffunction-sections
 LDSCRIPTS += $(AM_HOME)/scripts/linker_ysyxsoc.ld
 LDFLAGS   += --gc-sections -e _start
 
+# MAINARGS 支持：将参数嵌入到二进制文件中
+MAINARGS_MAX_LEN = 64
+MAINARGS_PLACEHOLDER = the_insert-arg_rule_in_Makefile_will_insert_mainargs_here
+CFLAGS += -DMAINARGS_MAX_LEN=$(MAINARGS_MAX_LEN) -DMAINARGS_PLACEHOLDER=$(MAINARGS_PLACEHOLDER)
+
 $(IMAGE).bin: $(IMAGE).elf
 	@$(OBJCOPY) -S -j .text -j .rodata -j .data -O binary $< $@
+	@python $(AM_HOME)/tools/insert-arg.py $@ $(MAINARGS_MAX_LEN) $(MAINARGS_PLACEHOLDER) "$(mainargs)"
 
 image: $(IMAGE).bin
 
