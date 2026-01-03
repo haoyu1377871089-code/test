@@ -41,8 +41,14 @@ bool cte_init(Context*(*handler)(Event, Context*)) {
 }
 
 Context *kcontext(Area kstack, void (*entry)(void *), void *arg) {
-  // 简单实现：暂不支持内核线程上下文
-  return NULL;
+  Context *c = (Context*)((char*)kstack.end - sizeof(Context));
+  c->mepc = (uintptr_t)entry;
+  c->gpr[10] = (uintptr_t)arg;  // a0 register
+  c->gpr[2] = (uintptr_t)c;     // sp register
+  c->mcause = 0;
+  c->mstatus = 0;
+  c->pdir = NULL;
+  return c;
 }
 
 void yield() {
@@ -58,4 +64,44 @@ bool ienabled() {
 void iset(bool enable) {
   // 简单实现：暂不支持真正的中断使能控制
   // 如果需要可以操作 mstatus.MIE 位
+}
+
+// MPE (多处理器扩展) 空实现
+bool mpe_init(void (*entry)()) {
+  return false;  // 不支持多处理器
+}
+
+int cpu_count() {
+  return 1;  // 只有一个 CPU
+}
+
+int cpu_current() {
+  return 0;  // 返回 CPU 0
+}
+
+int atomic_xchg(int *addr, int newval) {
+  int oldval = *addr;
+  *addr = newval;
+  return oldval;
+}
+
+// VME (虚拟内存扩展) 空实现
+bool vme_init(void* (*pgalloc)(int), void (*pgfree)(void*)) {
+  return false;  // 不支持虚拟内存
+}
+
+void protect(AddrSpace *as) {
+  // 空实现
+}
+
+void unprotect(AddrSpace *as) {
+  // 空实现
+}
+
+void map(AddrSpace *as, void *va, void *pa, int prot) {
+  // 空实现
+}
+
+Context *ucontext(AddrSpace *as, Area kstack, void *entry) {
+  return NULL;  // 不支持用户态上下文
 }

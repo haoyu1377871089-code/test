@@ -6,11 +6,12 @@
 
 static UART* uart = NULL;
 int16_t uart_divisor_cnt = 0;
+int16_t uart_rx_divisor_cnt = 0;  // Separate counter for RX timing
 bool is_uart_rx_idle = true;
 
 UART::UART(SDL_Renderer *rend, int cnt, int init_val, int ct, int x, int y, int w, int h):
     Component(rend, cnt, init_val, ct),
-    tx_state(0), rx_state(0), divisor(16), need_update_gui(false) {
+    tx_state(0), rx_state(0), divisor(32), need_update_gui(false) {
   term = new Term(rend, x, y, w, h);
 
   SDL_Rect *rect_ptr = new SDL_Rect;
@@ -18,6 +19,7 @@ UART::UART(SDL_Renderer *rend, int cnt, int init_val, int ct, int x, int y, int 
   set_rect(rect_ptr, 0);
 
   uart_divisor_cnt = divisor - 1;
+  uart_rx_divisor_cnt = divisor - 1;  // Initialize RX counter
   int len = pin_array[UART_TX].vector_len;
   assert(len == 0 || len == 1); // either unbound or bound to 1 bit signal
   p_tx = (uint8_t *)pin_array[UART_TX].ptr;
@@ -38,28 +40,35 @@ void UART::update_gui() { // everything is done in update_state()
 }
 
 void UART::tx_receive() {
-  uart_divisor_cnt = divisor - 1;
-
   uint8_t tx = *p_tx;
-  if (tx_state == 0) { // idle
-    if (!tx) { // start bit
+  
+  if (tx_state == 0) { // idle - sample every cycle to detect start bit
+    if (!tx) { // start bit detected
       tx_data = 0;
-      tx_state ++;
+      tx_state = 1;
+      // Wait 1.5 bit times to sample first data bit at its center
+      uart_divisor_cnt = divisor + divisor/2 - 1;
+    } else {
+      uart_divisor_cnt = 0;  // Sample every cycle while idle
     }
-  } else if (tx_state >= 1 && tx_state <= 8) { // data
-    tx_data = (tx << 7) | (tx_data >> 1);  // data bit
-    tx_state ++;
-  } else if (tx_state == 9) {
-    if (tx) { // stop bit
+  } else if (tx_state >= 1 && tx_state <= 8) { // data bits
+    tx_data = (tx << 7) | (tx_data >> 1);  // LSB first
+    tx_state++;
+    uart_divisor_cnt = divisor - 1;
+  } else if (tx_state == 9) { // stop bit
+    if (tx) { // correct stop bit
       tx_state = 0;
       term->feed_ch(tx_data);
       need_update_gui = true;
+    } else {
+      // Framing error - just reset
+      tx_state = 0;
     }
+    uart_divisor_cnt = 0;  // Immediately start looking for next start bit
   }
 }
 
 void UART::rx_send() {
-  // the uart_divisor_cnt is maintained in tx_receive()
   if (rx_state == 0) { // idle
     rx_data = rx_sending_str[0];
     if (rx_data == '\0') {

@@ -104,7 +104,11 @@ void Term::backspace(bool is_input) {
 }
 
 void Term::feed_ch(uint8_t ch) {
-  assert(ch < 128);
+  // Debug: print received character
+  if (ch >= 128 || ch < 32 && ch != '\n' && ch != '\r' && ch != '\b') {
+    fprintf(stderr, "[UART] Received invalid char: 0x%02x\n", ch);
+    return;  // Skip invalid characters instead of crashing
+  }
   if (is_cursor_on_screen()) set_dirty_char(cursor_y - screen_y, cursor_x);
   int y = cursor_y;
   assert(y < lines.size());

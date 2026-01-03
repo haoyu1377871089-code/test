@@ -14,6 +14,7 @@ static const char *tests[256] = {
   ['a'] = "audio test",
   ['p'] = "x86 virtual memory test",
   ['f'] = "flash read test",
+  ['P'] = "PS/2 direct register test",
 };
 
 int main(const char *args) {
@@ -28,6 +29,7 @@ int main(const char *args) {
     CASE('a', audio_test, IOE);
     CASE('p', vm_test, CTE(vm_handler), VME(simple_pgalloc, simple_pgfree));
     CASE('f', flash_test);
+    CASE('P', ps2_test);
     case 'H':
     default:
       printf("Usage: make run mainargs=*\n");

@@ -58,6 +58,9 @@ __am_asm_trap:
   mv a0, sp
   call __am_irq_handle
 
+  # 使用返回值作为新的上下文指针 (支持上下文切换)
+  mv sp, a0
+
   # 恢复 CSR 寄存器
   LOAD t1, OFFSET_STATUS(sp)
   LOAD t2, OFFSET_EPC(sp)

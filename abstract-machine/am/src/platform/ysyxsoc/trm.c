@@ -105,16 +105,44 @@ void _trm_init() {
   print_hex(marchid);
   putch('\n');
   
+  // 调试：输出数据段拷贝信息
+  putch('d'); putch('a'); putch('t'); putch('a'); putch(':'); putch(' ');
+  print_hex((uint32_t)&_data_load_addr);
+  putch(' '); putch('-'); putch('>'); putch(' ');
+  print_hex((uint32_t)&_data);
+  putch(' '); putch('-'); putch(' ');
+  print_hex((uint32_t)&_edata);
+  putch('\n');
+  
   // 拷贝数据段（从 Flash 到 PSRAM）
   uint32_t *src = (uint32_t *)&_data_load_addr;
   uint32_t *dst = (uint32_t *)&_data;
   uint32_t *end = (uint32_t *)&_edata;
   while (dst < end) { *dst++ = *src++; }
   
+  putch('d'); putch('a'); putch('t'); putch('a'); putch(' '); putch('o'); putch('k'); putch('\n');
+  
+  // 调试：输出 BSS 段信息
+  putch('b'); putch('s'); putch('s'); putch(':'); putch(' ');
+  print_hex((uint32_t)&_bss_start);
+  putch(' '); putch('-'); putch(' ');
+  print_hex((uint32_t)&_bss_end);
+  putch('\n');
+  
   // 清零 BSS 段
   dst = (uint32_t *)&_bss_start;
   end = (uint32_t *)&_bss_end;
   while (dst < end) { *dst++ = 0; }
+  
+  putch('b'); putch('s'); putch('s'); putch(' '); putch('o'); putch('k'); putch('\n');
+  
+  // 调试信息：即将调用 main
+  putch('c'); putch('a'); putch('l'); putch('l'); putch(' '); putch('m'); putch('a'); putch('i'); putch('n'); putch('\n');
+  
+  // 输出 mainargs 的前几个字符
+  putch('a'); putch('r'); putch('g'); putch('s'); putch('['); putch('0'); putch(']'); putch('=');
+  putch(mainargs[0]);
+  putch('\n');
   
   int ret = main(mainargs);
   halt(ret);

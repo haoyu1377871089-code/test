@@ -15,6 +15,20 @@ SECTIONS {
   .text : {
     *(entry)
     *(.text*)
+    /* RT-Thread: finsh shell symbols */
+    . = ALIGN(8);
+    __fsymtab_start = .;
+    KEEP(*(FSymTab))
+    __fsymtab_end = .;
+    __vsymtab_start = .;
+    KEEP(*(VSymTab))
+    __vsymtab_end = .;
+    __rt_init_start = .;
+    KEEP(*(SORT(.rti_fn*)))
+    __rt_init_end = .;
+    __rt_utest_tc_tab_start = .;
+    KEEP(*(UtestTcTab))
+    __rt_utest_tc_tab_end = .;
   } > flash : text
   etext = .;
   _etext = .;
@@ -29,6 +43,11 @@ SECTIONS {
     _data = .;
     *(.data*)
     *(.sdata*)
+    /* RT-Thread: AM apps data */
+    __am_apps_data_start = .;
+    *(__am_apps.data*)
+    *(__am_apps.sdata*)
+    __am_apps_data_end = .;
     . = ALIGN(4);
     _edata = .;
   } > psram : data
@@ -38,6 +57,12 @@ SECTIONS {
     *(.bss*)
     *(.sbss*)
     *(.scommon)
+    /* RT-Thread: AM apps bss */
+    __am_apps_bss_start = .;
+    *(__am_apps.bss*)
+    *(__am_apps.sbss*)
+    *(__am_apps.scommon*)
+    __am_apps_bss_end = .;
     . = ALIGN(4);
     _bss_end = .;
   } > psram

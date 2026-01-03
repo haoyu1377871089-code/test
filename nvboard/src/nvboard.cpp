@@ -25,10 +25,20 @@ void nvboard_update() {
   if (unlikely(!is_kb_idle)) kb_update();
 
   extern int16_t uart_divisor_cnt;
+  extern int16_t uart_rx_divisor_cnt;
   extern bool is_uart_rx_idle;
+  
+  // TX receiving - uses uart_divisor_cnt
   if (unlikely((-- uart_divisor_cnt) < 0)) {
     uart_tx_receive();
-    if (unlikely(!is_uart_rx_idle)) uart_rx_send();
+  }
+  
+  // RX sending - uses independent counter for proper timing
+  if (unlikely(!is_uart_rx_idle)) {
+    if ((-- uart_rx_divisor_cnt) < 0) {
+      uart_rx_send();
+      uart_rx_divisor_cnt = 31;  // Reset to divisor-1
+    }
   }
 
   static uint64_t last = 0;
