@@ -14,6 +14,12 @@
 #define PS2_BASE    0x10011000UL
 #define PS2_DATA    (PS2_BASE + 0)        // 扫描码数据寄存器
 
+// VGA 控制器 (帧缓冲)
+#define VGA_BASE    0x21000000UL
+#define VGA_CTRL    (VGA_BASE + 0x00)     // 控制寄存器 (读: [31:16]=宽度, [15:0]=高度)
+#define VGA_SYNC    (VGA_BASE + 0x04)     // 同步寄存器 (写: 触发同步)
+#define VGA_FB      (VGA_BASE + 0x08)     // 帧缓冲起始地址
+
 static uint64_t boot_time = 0;
 
 void __am_timer_init() {
@@ -206,6 +212,42 @@ static void __am_uart_rx(AM_UART_RX_T *rx) {
   }
 }
 
+// GPU/VGA 控制器 (640x480 同步刷新)
+#define VGA_WIDTH   640
+#define VGA_HEIGHT  480
+
+static void __am_gpu_config(AM_GPU_CONFIG_T *cfg) {
+  cfg->present = true;
+  cfg->has_accel = false;
+  cfg->width = VGA_WIDTH;
+  cfg->height = VGA_HEIGHT;
+  cfg->vmemsz = VGA_WIDTH * VGA_HEIGHT * sizeof(uint32_t);
+}
+
+static void __am_gpu_fbdraw(AM_GPU_FBDRAW_T *ctl) {
+  int x = ctl->x, y = ctl->y, w = ctl->w, h = ctl->h;
+  uint32_t *pixels = (uint32_t *)ctl->pixels;
+  uint32_t *fb = (uint32_t *)VGA_FB;
+  
+  // 将像素写入帧缓冲区
+  for (int j = 0; j < h; j++) {
+    for (int i = 0; i < w; i++) {
+      if (x + i < VGA_WIDTH && y + j < VGA_HEIGHT) {
+        fb[(y + j) * VGA_WIDTH + (x + i)] = pixels[j * w + i];
+      }
+    }
+  }
+  
+  // 如果需要同步，触发同步
+  if (ctl->sync) {
+    *(volatile uint32_t *)VGA_SYNC = 1;
+  }
+}
+
+static void __am_gpu_status(AM_GPU_STATUS_T *status) {
+  status->ready = true;  // VGA 控制器始终就绪
+}
+
 static void fail(void *buf) { panic("access nonexist register"); }
 
 typedef void (*handler_t)(void *buf);
@@ -217,6 +259,9 @@ static void *lut[128] = {
   [AM_INPUT_KEYBRD] = __am_input_keybrd,
   [AM_UART_CONFIG ] = __am_uart_config,
   [AM_UART_RX     ] = __am_uart_rx,
+  [AM_GPU_CONFIG  ] = __am_gpu_config,
+  [AM_GPU_FBDRAW  ] = __am_gpu_fbdraw,
+  [AM_GPU_STATUS  ] = __am_gpu_status,
 };
 
 bool ioe_init() {

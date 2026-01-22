@@ -7,7 +7,8 @@ extern char _stack_pointer;
 int main(const char *args);
 
 // MAINARGS 支持
-static const char mainargs[MAINARGS_MAX_LEN] = TOSTRING(MAINARGS_PLACEHOLDER);
+// 使用 volatile 防止编译器常量折叠优化，因为 insert-arg.py 会在运行时修改这个字符串
+static volatile const char mainargs[MAINARGS_MAX_LEN] = TOSTRING(MAINARGS_PLACEHOLDER);
 
 #define STACK_SIZE 0x1000
 // Heap 在 PSRAM 中，从 _heap_start 到 _heap_end
@@ -144,6 +145,6 @@ void _trm_init() {
   putch(mainargs[0]);
   putch('\n');
   
-  int ret = main(mainargs);
+  int ret = main((const char *)mainargs);
   halt(ret);
 }

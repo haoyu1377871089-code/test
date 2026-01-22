@@ -19,17 +19,28 @@ static void timer_test() {
   printf("Loop 10^7 time elapse: %d ms\n", t1 - t0);
 }
 
-static uint8_t vmem[512 << 10];
+// 使用堆分配代替静态数组，避免 BSS 初始化开销
+static uint8_t *vmem = NULL;
+#define VMEM_SIZE (512 << 10)
 static inline gpuptr_t to_guest(void *ptr) { return ptr ? (uint8_t *)ptr - vmem : AM_GPU_NULL; }
 
 static void video_test() {
+  // 动态分配 vmem
+  if (vmem == NULL) {
+    vmem = (uint8_t *)heap.start;
+    if ((uintptr_t)vmem + VMEM_SIZE > (uintptr_t)heap.end) {
+      printf("Not enough heap for vmem!\n");
+      return;
+    }
+  }
+  
   AM_GPU_CONFIG_T info = io_read(AM_GPU_CONFIG);
   int w = info.width, h = info.height;
   printf("Screen size: %d x %d\n", w, h);
 
   struct gpu_canvas *cv = (void *)vmem;
 
-  for (uint8_t *p = (void *)&cv[8]; p != vmem + sizeof(vmem); p++)
+  for (uint8_t *p = (void *)&cv[8]; p != vmem + VMEM_SIZE; p++)
     *p = rand() & 0xff;
 
   cv[0] = (struct gpu_canvas) {
@@ -42,7 +53,7 @@ static void video_test() {
     .sibling = to_guest(NULL),
   };
 
-  io_write(AM_GPU_MEMCPY, 0, vmem, sizeof(vmem));
+  io_write(AM_GPU_MEMCPY, 0, vmem, VMEM_SIZE);
   io_write(AM_GPU_RENDER, 0);
 }
 

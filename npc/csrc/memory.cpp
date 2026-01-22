@@ -168,8 +168,11 @@ extern "C" void pmem_write(uint32_t waddr, uint32_t wdata, uint8_t wmask) {
   
   // 检查是否是设备地址范围（简化检查）
   // 包括: 设备区域 0xa0000000-0xa2000000, UART 0x10000000-0x10001000, SPI 0x10001000-0x10002000, GPIO 0x10002000-0x10003000
-  if ((waddr >= 0xa0000000 && waddr < 0xa2000000) || (waddr >= 0x10000000 && waddr < 0x10003000)) {
-    // 属于设备地址范围，设备模块已处理
+  // VGA 帧缓冲: 0x21000000-0x21200000 (2MB)
+  if ((waddr >= 0xa0000000 && waddr < 0xa2000000) || 
+      (waddr >= 0x10000000 && waddr < 0x10012000) ||
+      (waddr >= 0x21000000 && waddr < 0x21200000)) {
+    // 属于设备地址范围，由 SoC RTL 仿真处理
     return;
   }
 
