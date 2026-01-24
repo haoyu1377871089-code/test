@@ -1,6 +1,6 @@
 `include "axi4_lite_interface.vh"
 
-module IFU_AXI (
+module IFU_SRAM (
     input clk,
     input rst,
     
@@ -88,53 +88,29 @@ always @(posedge clk or posedge rst) begin
     wvalid <= 1'b0;
     bready <= 1'b0;
     
-    // 1级流水线：把请求与地址打一拍
+    // 简单SRAM模式：1周期延迟，通过pmem_read获取数据
     addr_stage1 <= addr;
     req_stage1  <= req;
 
-    // 下一拍输出有效与数据，实现1周期读延迟
-    // rvalid_out <= req_stage1;
-    // if (req_stage1) begin
-    //   rdata_out <= pmem_read(addr_stage1);
-    // end
-    
-    // AXI4-Lite握手信号（简化处理，立即响应）
-    if (req) begin
-      araddr <= addr;
-      arvalid <= 1'b1;
-      rready <= 1'b1;
-      rvalid_out <= 1'b0; // 等待AXI响应
-    end else if (arvalid && arready) begin
-      arvalid <= 1'b0;
-    end 
-    
-    if (rvalid && rready) begin
-      rready <= 1'b0;
-      rdata_out <= rdata; // 从AXI读取数据
-      rvalid_out <= 1'b1; // 输出有效
+    rvalid_out <= req_stage1;
+    if (req_stage1) begin
+      rdata_out <= pmem_read(addr_stage1);
 `ifdef SIMULATION
       perf_ifu_fetch_cnt <= perf_ifu_fetch_cnt + 1; // 成功取指
 `endif
-    end else begin
-      rvalid_out <= 1'b0;
     end
+    
+    // AXI信号保持为0（本模块使用pmem_read，不走AXI）
+    araddr <= 32'h0;
+    arvalid <= 1'b0;
+    rready <= 1'b0;
 
 `ifdef SIMULATION
     // 性能计数：统计各种状态周期
     if (req) perf_ifu_req_cycles <= perf_ifu_req_cycles + 1;
-    if (arvalid && !arready) perf_ifu_stall_arb_cycles <= perf_ifu_stall_arb_cycles + 1;
-    if (arvalid || rready) perf_ifu_wait_cycles <= perf_ifu_wait_cycles + 1;
+    if (req_stage1) perf_ifu_wait_cycles <= perf_ifu_wait_cycles + 1;
 `endif
   end
-end
-
-// 断言：确保写通道信号始终为0
-always @(posedge clk) begin
-    if (!rst) begin
-        assert(awvalid == 1'b0) else $error("IFU awvalid should always be 0");
-        assert(wvalid == 1'b0) else $error("IFU wvalid should always be 0");
-        assert(bready == 1'b0) else $error("IFU bready should always be 0");
-    end
 end
 
 endmodule

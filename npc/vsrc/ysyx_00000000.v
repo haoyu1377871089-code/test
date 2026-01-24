@@ -445,6 +445,125 @@ module ysyx_00000000 (
             end_flag_reg <= ebreak_detected;
             if (ebreak_detected) begin
                 exit_code_reg <= exit_value;
+`ifdef SIMULATION
+                // ========== 性能计数器统计输出 ==========
+                $display("");
+                $display("========== NPC Performance Counter Report ==========");
+                $display("");
+                
+                // EXU 统计
+                $display("[EXU Statistics]");
+                $display("  Total Cycles:      %0d", EXU.perf_mcycle);
+                $display("  Retired Instrs:    %0d", EXU.perf_minstret);
+                $display("  IPC:               %0d.%02d", 
+                    (EXU.perf_minstret * 100) / EXU.perf_mcycle / 100,
+                    (EXU.perf_minstret * 100) / EXU.perf_mcycle % 100);
+                $display("  CPI:               %0d.%02d",
+                    (EXU.perf_mcycle * 100) / EXU.perf_minstret / 100,
+                    (EXU.perf_mcycle * 100) / EXU.perf_minstret % 100);
+                $display("");
+                
+                // EXU 状态周期分布
+                $display("[EXU State Cycle Distribution]");
+                $display("  IDLE Cycles:       %0d (%0d%%)", EXU.perf_exu_idle_cycles,
+                    (EXU.perf_exu_idle_cycles * 100) / EXU.perf_mcycle);
+                $display("  EXEC Cycles:       %0d (%0d%%)", EXU.perf_exu_exec_cycles,
+                    (EXU.perf_exu_exec_cycles * 100) / EXU.perf_mcycle);
+                $display("  WAIT_LSU Cycles:   %0d (%0d%%)", EXU.perf_exu_wait_lsu_cycles,
+                    (EXU.perf_exu_wait_lsu_cycles * 100) / EXU.perf_mcycle);
+                $display("");
+                
+                // 指令类型统计
+                $display("[Instruction Type Statistics]");
+                $display("  ALU R-type:        %0d (%0d%%)", EXU.perf_alu_r_cnt,
+                    (EXU.perf_alu_r_cnt * 100) / EXU.perf_minstret);
+                $display("  ALU I-type:        %0d (%0d%%)", EXU.perf_alu_i_cnt,
+                    (EXU.perf_alu_i_cnt * 100) / EXU.perf_minstret);
+                $display("  Load:              %0d (%0d%%)", EXU.perf_load_cnt,
+                    (EXU.perf_load_cnt * 100) / EXU.perf_minstret);
+                $display("  Store:             %0d (%0d%%)", EXU.perf_store_cnt,
+                    (EXU.perf_store_cnt * 100) / EXU.perf_minstret);
+                $display("  Branch:            %0d (%0d%%, taken: %0d)", EXU.perf_branch_cnt,
+                    (EXU.perf_branch_cnt * 100) / EXU.perf_minstret, EXU.perf_branch_taken_cnt);
+                $display("  JAL:               %0d (%0d%%)", EXU.perf_jal_cnt,
+                    (EXU.perf_jal_cnt * 100) / EXU.perf_minstret);
+                $display("  JALR:              %0d (%0d%%)", EXU.perf_jalr_cnt,
+                    (EXU.perf_jalr_cnt * 100) / EXU.perf_minstret);
+                $display("  LUI:               %0d (%0d%%)", EXU.perf_lui_cnt,
+                    (EXU.perf_lui_cnt * 100) / EXU.perf_minstret);
+                $display("  AUIPC:             %0d (%0d%%)", EXU.perf_auipc_cnt,
+                    (EXU.perf_auipc_cnt * 100) / EXU.perf_minstret);
+                $display("  CSR:               %0d (%0d%%)", EXU.perf_csr_cnt,
+                    (EXU.perf_csr_cnt * 100) / EXU.perf_minstret);
+                $display("  SYSTEM:            %0d (%0d%%)", EXU.perf_system_cnt,
+                    (EXU.perf_system_cnt * 100) / EXU.perf_minstret);
+                $display("  FENCE:             %0d (%0d%%)", EXU.perf_fence_cnt,
+                    (EXU.perf_fence_cnt * 100) / EXU.perf_minstret);
+                $display("");
+                
+                // 指令分类汇总
+                $display("[Instruction Category Summary]");
+                $display("  Compute (ALU R+I): %0d (%0d%%)", 
+                    EXU.perf_alu_r_cnt + EXU.perf_alu_i_cnt,
+                    ((EXU.perf_alu_r_cnt + EXU.perf_alu_i_cnt) * 100) / EXU.perf_minstret);
+                $display("  Memory (Load+Store): %0d (%0d%%)", 
+                    EXU.perf_load_cnt + EXU.perf_store_cnt,
+                    ((EXU.perf_load_cnt + EXU.perf_store_cnt) * 100) / EXU.perf_minstret);
+                $display("  Control (Br+J+JAL+JALR): %0d (%0d%%)", 
+                    EXU.perf_branch_cnt + EXU.perf_jal_cnt + EXU.perf_jalr_cnt,
+                    ((EXU.perf_branch_cnt + EXU.perf_jal_cnt + EXU.perf_jalr_cnt) * 100) / EXU.perf_minstret);
+                $display("");
+                
+                // IFU 统计
+                $display("[IFU Statistics]");
+                $display("  Fetch Count:       %0d", u_ifu.perf_ifu_fetch_cnt);
+                $display("  Request Cycles:    %0d", u_ifu.perf_ifu_req_cycles);
+                $display("  Wait Cycles:       %0d", u_ifu.perf_ifu_wait_cycles);
+                $display("  Arb Stall Cycles:  %0d", u_ifu.perf_ifu_stall_arb_cycles);
+                if (u_ifu.perf_ifu_fetch_cnt > 0) begin
+                    $display("  Avg Fetch Latency: %0d.%02d cycles",
+                        u_ifu.perf_ifu_wait_cycles / u_ifu.perf_ifu_fetch_cnt,
+                        (u_ifu.perf_ifu_wait_cycles * 100 / u_ifu.perf_ifu_fetch_cnt) % 100);
+                end
+                $display("");
+                
+                // LSU 统计
+                $display("[LSU Statistics]");
+                $display("  Load Count:        %0d", u_lsu.perf_lsu_load_cnt);
+                $display("  Store Count:       %0d", u_lsu.perf_lsu_store_cnt);
+                $display("  Load Total Cycles: %0d", u_lsu.perf_lsu_load_cycles);
+                $display("  Store Total Cycles:%0d", u_lsu.perf_lsu_store_cycles);
+                $display("  Arb Stall Cycles:  %0d", u_lsu.perf_lsu_stall_arb_cycles);
+                if (u_lsu.perf_lsu_load_cnt > 0) begin
+                    $display("  Avg Load Latency:  %0d.%02d cycles",
+                        u_lsu.perf_lsu_load_cycles / u_lsu.perf_lsu_load_cnt,
+                        (u_lsu.perf_lsu_load_cycles * 100 / u_lsu.perf_lsu_load_cnt) % 100);
+                end
+                if (u_lsu.perf_lsu_store_cnt > 0) begin
+                    $display("  Avg Store Latency: %0d.%02d cycles",
+                        u_lsu.perf_lsu_store_cycles / u_lsu.perf_lsu_store_cnt,
+                        (u_lsu.perf_lsu_store_cycles * 100 / u_lsu.perf_lsu_store_cnt) % 100);
+                end
+                $display("");
+                
+                // 一致性检查
+                $display("[Consistency Check]");
+                $display("  IFU Fetch = Retired Instrs: %s", 
+                    (u_ifu.perf_ifu_fetch_cnt == EXU.perf_minstret) ? "PASS" : "FAIL");
+                $display("  Sum of Instr Types = Retired: %s",
+                    ((EXU.perf_alu_r_cnt + EXU.perf_alu_i_cnt + EXU.perf_load_cnt + 
+                      EXU.perf_store_cnt + EXU.perf_branch_cnt + EXU.perf_jal_cnt + 
+                      EXU.perf_jalr_cnt + EXU.perf_lui_cnt + EXU.perf_auipc_cnt + 
+                      EXU.perf_csr_cnt + EXU.perf_system_cnt + EXU.perf_fence_cnt) == EXU.perf_minstret) 
+                    ? "PASS" : "FAIL");
+                $display("  EXU Load = LSU Load: %s",
+                    (EXU.perf_load_cnt == u_lsu.perf_lsu_load_cnt) ? "PASS" : "FAIL");
+                $display("  EXU Store = LSU Store: %s",
+                    (EXU.perf_store_cnt == u_lsu.perf_lsu_store_cnt) ? "PASS" : "FAIL");
+                $display("");
+                $display("====================================================");
+                $display("");
+`endif
                 npc_trap(exit_value);
             end
         end

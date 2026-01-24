@@ -53,6 +53,30 @@ module EXU (
     reg [31:0] csr_rdata; // CSR读数据
     wire [11:0] csr_addr = op[31:20]; // CSR地址
     
+    // ========== 性能计数器 (仅仿真) ==========
+`ifdef SIMULATION
+    reg [63:0] perf_mcycle;      // 总周期数
+    reg [63:0] perf_minstret;    // 退休指令数
+    // 指令类型计数器
+    reg [63:0] perf_alu_r_cnt;   // R型ALU指令
+    reg [63:0] perf_alu_i_cnt;   // I型ALU指令
+    reg [63:0] perf_load_cnt;    // Load指令
+    reg [63:0] perf_store_cnt;   // Store指令
+    reg [63:0] perf_branch_cnt;  // 分支指令
+    reg [63:0] perf_branch_taken_cnt; // 分支taken次数
+    reg [63:0] perf_jal_cnt;     // JAL指令
+    reg [63:0] perf_jalr_cnt;    // JALR指令
+    reg [63:0] perf_lui_cnt;     // LUI指令
+    reg [63:0] perf_auipc_cnt;   // AUIPC指令
+    reg [63:0] perf_csr_cnt;     // CSR指令
+    reg [63:0] perf_system_cnt;  // SYSTEM指令 (ecall/ebreak/mret)
+    reg [63:0] perf_fence_cnt;   // FENCE指令
+    // EXU状态统计
+    reg [63:0] perf_exu_idle_cycles;   // EXU空闲周期
+    reg [63:0] perf_exu_exec_cycles;   // EXU执行周期
+    reg [63:0] perf_exu_wait_lsu_cycles; // EXU等待LSU周期
+`endif
+    
     // ========== 指令译码模块 (IDU) ==========
     // 操作码和功能码提取
     wire [6:0] opcode = op[6:0];
@@ -158,7 +182,39 @@ module EXU (
             mcause <= 32'h0;        // 异常原因
             mstatus <= 32'h0;       // 状态寄存器
             csr_wen <= 0;
+`ifdef SIMULATION
+            // 初始化性能计数器
+            perf_mcycle <= 64'h0;
+            perf_minstret <= 64'h0;
+            perf_alu_r_cnt <= 64'h0;
+            perf_alu_i_cnt <= 64'h0;
+            perf_load_cnt <= 64'h0;
+            perf_store_cnt <= 64'h0;
+            perf_branch_cnt <= 64'h0;
+            perf_branch_taken_cnt <= 64'h0;
+            perf_jal_cnt <= 64'h0;
+            perf_jalr_cnt <= 64'h0;
+            perf_lui_cnt <= 64'h0;
+            perf_auipc_cnt <= 64'h0;
+            perf_csr_cnt <= 64'h0;
+            perf_system_cnt <= 64'h0;
+            perf_fence_cnt <= 64'h0;
+            perf_exu_idle_cycles <= 64'h0;
+            perf_exu_exec_cycles <= 64'h0;
+            perf_exu_wait_lsu_cycles <= 64'h0;
+`endif
         end else begin
+`ifdef SIMULATION
+            // 周期计数器每周期递增
+            perf_mcycle <= perf_mcycle + 1;
+            // 状态周期统计
+            case (state)
+                IDLE: perf_exu_idle_cycles <= perf_exu_idle_cycles + 1;
+                DECODE, EXECUTE, WRITEBACK: perf_exu_exec_cycles <= perf_exu_exec_cycles + 1;
+                WAIT_LSU: perf_exu_wait_lsu_cycles <= perf_exu_wait_lsu_cycles + 1;
+                default: ;
+            endcase
+`endif
             case (state)
                 IDLE: begin
                     if (op_en) begin
@@ -465,6 +521,33 @@ module EXU (
                     // 清除LSU信号
                     lsu_req <= 0;
                     lsu_wen <= 0;
+                    
+`ifdef SIMULATION
+                    // 性能计数器：统计指令类型
+                    perf_minstret <= perf_minstret + 1;
+                    case (opcode)
+                        7'b0110011: perf_alu_r_cnt <= perf_alu_r_cnt + 1;  // R型ALU
+                        7'b0010011: perf_alu_i_cnt <= perf_alu_i_cnt + 1;  // I型ALU
+                        7'b0000011: perf_load_cnt <= perf_load_cnt + 1;    // Load
+                        7'b0100011: perf_store_cnt <= perf_store_cnt + 1;  // Store
+                        7'b1100011: begin  // Branch
+                            perf_branch_cnt <= perf_branch_cnt + 1;
+                            if (branch_taken) perf_branch_taken_cnt <= perf_branch_taken_cnt + 1;
+                        end
+                        7'b1101111: perf_jal_cnt <= perf_jal_cnt + 1;      // JAL
+                        7'b1100111: perf_jalr_cnt <= perf_jalr_cnt + 1;    // JALR
+                        7'b0110111: perf_lui_cnt <= perf_lui_cnt + 1;      // LUI
+                        7'b0010111: perf_auipc_cnt <= perf_auipc_cnt + 1;  // AUIPC
+                        7'b0001111: perf_fence_cnt <= perf_fence_cnt + 1;  // FENCE
+                        7'b1110011: begin  // SYSTEM
+                            if (funct3 == 3'b000)
+                                perf_system_cnt <= perf_system_cnt + 1;  // ecall/ebreak/mret
+                            else
+                                perf_csr_cnt <= perf_csr_cnt + 1;  // CSR指令
+                        end
+                        default: ;
+                    endcase
+`endif
                     
                     // CSR写入逻辑
                     if (csr_wen) begin

@@ -46,6 +46,19 @@ module LSU_AXI (
 import "DPI-C" function int unsigned pmem_read(input int unsigned raddr);
 import "DPI-C" function void pmem_write(input int unsigned waddr, input int unsigned wdata, input byte unsigned wmask);
 
+// ========== 性能计数器 (仅仿真) ==========
+`ifdef SIMULATION
+    reg [63:0] perf_lsu_load_cnt;       // Load请求次数
+    reg [63:0] perf_lsu_store_cnt;      // Store请求次数
+    reg [63:0] perf_lsu_load_cycles;    // Load总周期数 (从请求到完成)
+    reg [63:0] perf_lsu_store_cycles;   // Store总周期数
+    reg [63:0] perf_lsu_stall_arb_cycles; // 等待仲裁周期数
+    // 临时计数器用于计算单次访存延迟
+    reg [31:0] lsu_cycle_counter;
+    reg        lsu_in_flight;           // 有访存请求在进行中
+    reg        lsu_is_load;             // 当前是load操作
+`endif
+
 // ========= 数据存储器已禁用，使用外部PSRAM =========
 // 原DMEM范围 0x80000000 - 0x800003FF (1KB) 现在通过AXI访问外部PSRAM
 localparam DMEM_BASE  = 32'h8000_0000;
@@ -116,6 +129,17 @@ always @(posedge clk or posedge rst) begin
     araddr <= 32'h0;
     arvalid <= 1'b0;
     rready <= 1'b0;
+`ifdef SIMULATION
+    // 初始化性能计数器
+    perf_lsu_load_cnt <= 64'h0;
+    perf_lsu_store_cnt <= 64'h0;
+    perf_lsu_load_cycles <= 64'h0;
+    perf_lsu_store_cycles <= 64'h0;
+    perf_lsu_stall_arb_cycles <= 64'h0;
+    lsu_cycle_counter <= 32'h0;
+    lsu_in_flight <= 1'b0;
+    lsu_is_load <= 1'b0;
+`endif
   end else begin
     // 第一级流水线：保存请求信息
     // 仅在发起新请求时更新地址，防止在等待总线响应期间地址变化
@@ -174,13 +198,35 @@ always @(posedge clk or posedge rst) begin
                 awaddr <= addr; awvalid <= 1'b1;
                 wdata_axi <= wdata; wstrb <= wmask; wvalid <= 1'b1;
                 bready <= 1'b1;
+`ifdef SIMULATION
+                perf_lsu_store_cnt <= perf_lsu_store_cnt + 1;
+                lsu_in_flight <= 1'b1;
+                lsu_is_load <= 1'b0;
+                lsu_cycle_counter <= 32'h1;
+`endif
             end else begin
                 araddr <= addr; arvalid <= 1'b1;
                 rready <= 1'b1;
+`ifdef SIMULATION
+                perf_lsu_load_cnt <= perf_lsu_load_cnt + 1;
+                lsu_in_flight <= 1'b1;
+                lsu_is_load <= 1'b1;
+                lsu_cycle_counter <= 32'h1;
+`endif
             end
         end
     end else begin
         // BUSY: Handle Handshakes
+`ifdef SIMULATION
+        // 访存进行中，计数周期
+        if (lsu_in_flight) begin
+            lsu_cycle_counter <= lsu_cycle_counter + 1;
+        end
+        // 等待仲裁统计
+        if ((arvalid && !arready) || (awvalid && !awready)) begin
+            perf_lsu_stall_arb_cycles <= perf_lsu_stall_arb_cycles + 1;
+        end
+`endif
         // Write Address
         if (awvalid && awready) awvalid <= 1'b0;
         // Write Data
@@ -189,6 +235,10 @@ always @(posedge clk or posedge rst) begin
         if (bvalid && bready && !awvalid && !wvalid) begin
             bready <= 1'b0;
             rvalid_out <= 1'b1; // Write Done
+`ifdef SIMULATION
+            perf_lsu_store_cycles <= perf_lsu_store_cycles + lsu_cycle_counter;
+            lsu_in_flight <= 1'b0;
+`endif
         end
         
         // Read Address
@@ -204,6 +254,10 @@ always @(posedge clk or posedge rst) begin
                 2'b11: rdata_out <= {24'b0, rdata[31:24]};
             endcase
             rvalid_out <= 1'b1; // Read Done
+`ifdef SIMULATION
+            perf_lsu_load_cycles <= perf_lsu_load_cycles + lsu_cycle_counter;
+            lsu_in_flight <= 1'b0;
+`endif
         end else begin
             rvalid_out <= 1'b0;
         end

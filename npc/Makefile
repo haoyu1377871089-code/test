@@ -8,11 +8,13 @@ GTKWAVE      ?= gtkwave
 
 VERILATOR = verilator
 VERILATOR_CFLAGS += -MMD --build -cc  \
-                -O3 --x-assign fast --x-initial fast --noassert
+                -O3 --x-assign fast --x-initial fast --noassert \
+                +define+SIMULATION
 
 # 禁用VCD波形生成以节省磁盘空间（用于主频评估）
 VERILATOR_CFLAGS_NO_TRACE = -MMD --build -cc  \
-                -O3 --x-assign fast --x-initial fast --noassert
+                -O3 --x-assign fast --x-initial fast --noassert \
+                +define+SIMULATION
 
 BUILD_DIR = ./build
 OBJ_DIR = $(BUILD_DIR)/obj_dir
@@ -34,6 +36,8 @@ $(SRC_AUTO_BIND): $(NXDC_FILES)
 # project source
 VSRCS = $(shell find $(abspath ./vsrc) -name "*.v")
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c" -or -name "*.cc" -or -name "*.cpp")
+# 排除 main_soc.cpp（用于 ysyxSoC 配置）
+CSRCS := $(filter-out $(abspath ./csrc/main_soc.cpp), $(CSRCS))
 # CSRCS += $(SRC_AUTO_BIND) 等到需要nvboard再加上
 
 # rules for verilator
