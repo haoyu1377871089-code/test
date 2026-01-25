@@ -136,6 +136,14 @@ module ysyx_00000000 (
     reg [31:0] op_ifu;
     wire [31:0] ifu_addr = (update_pc) ? next_pc : pc;
 
+    // I-Cache Signals
+    wire        icache_rvalid;
+    wire [31:0] icache_rdata;
+    wire        icache_mem_req;
+    wire [31:0] icache_mem_addr;
+    wire        icache_mem_rvalid;
+    wire [31:0] icache_mem_rdata;
+
     // AXI4-Lite Signals (IFU)
     wire [31:0] ifu_awaddr;
     wire        ifu_awvalid;
@@ -219,7 +227,43 @@ module ysyx_00000000 (
         // .regs (exu_regs)
     );
 
-    // IFU_AXI
+    // I-Cache (temporarily bypassed for debugging)
+`ifdef ENABLE_ICACHE
+    ICache u_icache (
+        .clk         (clk),
+        .rst         (rst),
+        // Upstream interface (to CPU)
+        .cpu_req     (ifu_req),
+        .cpu_addr    (ifu_addr),
+        .cpu_rvalid  (icache_rvalid),
+        .cpu_rdata   (icache_rdata),
+        // Downstream interface (to IFU_AXI)
+        .mem_req     (icache_mem_req),
+        .mem_addr    (icache_mem_addr),
+        .mem_rvalid  (icache_mem_rvalid),
+        .mem_rdata   (icache_mem_rdata)
+    );
+
+    // Connect ICache outputs to IFU signals (for control logic)
+    assign ifu_rvalid = icache_rvalid;
+    assign ifu_rdata = icache_rdata;
+
+    // IFU_AXI (now driven by ICache for memory access)
+    IFU_AXI u_ifu (
+        .clk         (clk),
+        .rst         (rst),
+        .req         (icache_mem_req),
+        .addr        (icache_mem_addr),
+        .rvalid_out  (icache_mem_rvalid),
+        .rdata_out   (icache_mem_rdata),
+`else
+    // Bypass I-Cache: connect directly to IFU_AXI
+    assign icache_rvalid = 1'b0;  // Unused
+    assign icache_rdata = 32'h0;  // Unused
+    assign icache_mem_req = 1'b0;  // Unused
+    assign icache_mem_addr = 32'h0;  // Unused
+
+    // IFU_AXI (directly connected to control logic)
     IFU_AXI u_ifu (
         .clk         (clk),
         .rst         (rst),
@@ -227,6 +271,7 @@ module ysyx_00000000 (
         .addr        (ifu_addr),
         .rvalid_out  (ifu_rvalid),
         .rdata_out   (ifu_rdata),
+`endif
         .awaddr      (ifu_awaddr),
         .awvalid     (ifu_awvalid),
         .awready     (ifu_awready),
@@ -443,6 +488,7 @@ module ysyx_00000000 (
                 op_ifu <= ifu_rdata;
                 op_en_ifu <= 1'b1;
             end
+
             
             end_flag_reg <= ebreak_detected;
             if (ebreak_detected) begin
@@ -516,14 +562,33 @@ module ysyx_00000000 (
                     ((EXU.perf_branch_cnt + EXU.perf_jal_cnt + EXU.perf_jalr_cnt) * 100) / EXU.perf_minstret);
                 $display("");
                 
+`ifdef ENABLE_ICACHE
+                // I-Cache 统计
+                $display("[I-Cache Statistics]");
+                $display("  Hit Count:         %0d", u_icache.perf_icache_hit_cnt);
+                $display("  Miss Count:        %0d", u_icache.perf_icache_miss_cnt);
+                if ((u_icache.perf_icache_hit_cnt + u_icache.perf_icache_miss_cnt) > 0) begin
+                    $display("  Hit Rate:          %0d.%02d%%",
+                        (u_icache.perf_icache_hit_cnt * 100) / (u_icache.perf_icache_hit_cnt + u_icache.perf_icache_miss_cnt),
+                        (u_icache.perf_icache_hit_cnt * 10000 / (u_icache.perf_icache_hit_cnt + u_icache.perf_icache_miss_cnt)) % 100);
+                end
+                $display("  Refill Cycles:     %0d", u_icache.perf_icache_refill_cycles);
+                if (u_icache.perf_icache_miss_cnt > 0) begin
+                    $display("  Avg Refill Latency:%0d.%02d cycles",
+                        u_icache.perf_icache_refill_cycles / u_icache.perf_icache_miss_cnt,
+                        (u_icache.perf_icache_refill_cycles * 100 / u_icache.perf_icache_miss_cnt) % 100);
+                end
+                $display("");
+`endif
+                
                 // IFU 统计
-                $display("[IFU Statistics]");
-                $display("  Fetch Count:       %0d", u_ifu.perf_ifu_fetch_cnt);
+                $display("[IFU/Memory Statistics]");
+                $display("  Mem Fetch Count:   %0d", u_ifu.perf_ifu_fetch_cnt);
                 $display("  Request Cycles:    %0d", u_ifu.perf_ifu_req_cycles);
                 $display("  Wait Cycles:       %0d", u_ifu.perf_ifu_wait_cycles);
                 $display("  Arb Stall Cycles:  %0d", u_ifu.perf_ifu_stall_arb_cycles);
                 if (u_ifu.perf_ifu_fetch_cnt > 0) begin
-                    $display("  Avg Fetch Latency: %0d.%02d cycles",
+                    $display("  Avg Mem Latency:   %0d.%02d cycles",
                         u_ifu.perf_ifu_wait_cycles / u_ifu.perf_ifu_fetch_cnt,
                         (u_ifu.perf_ifu_wait_cycles * 100 / u_ifu.perf_ifu_fetch_cnt) % 100);
                 end
@@ -550,11 +615,22 @@ module ysyx_00000000 (
                 
                 // 一致性检查
                 $display("[Consistency Check]");
-                // IFU Fetch 允许比 Retired 多1（ebreak时有预取）
+`ifdef ENABLE_ICACHE
+                // I-Cache: Hit + Miss 应该接近 Retired Instrs (允许差1，ebreak时有预取)
+                $display("  ICache Accesses ~= Retired: %s (diff=%0d)", 
+                    (((u_icache.perf_icache_hit_cnt + u_icache.perf_icache_miss_cnt) == EXU.perf_minstret) || 
+                     ((u_icache.perf_icache_hit_cnt + u_icache.perf_icache_miss_cnt) == EXU.perf_minstret + 1)) ? "PASS" : "FAIL",
+                    (u_icache.perf_icache_hit_cnt + u_icache.perf_icache_miss_cnt) - EXU.perf_minstret);
+                // IFU Mem Fetch = I-Cache Miss (1 word per miss)
+                $display("  Mem Fetches = Miss: %s",
+                    (u_ifu.perf_ifu_fetch_cnt == u_icache.perf_icache_miss_cnt) ? "PASS" : "FAIL");
+`else
+                // No I-Cache: IFU Fetch 允许比 Retired 多1（ebreak时有预取）
                 $display("  IFU Fetch ~= Retired Instrs: %s (diff=%0d)", 
                     ((u_ifu.perf_ifu_fetch_cnt == EXU.perf_minstret) || 
                      (u_ifu.perf_ifu_fetch_cnt == EXU.perf_minstret + 1)) ? "PASS" : "FAIL",
                     u_ifu.perf_ifu_fetch_cnt - EXU.perf_minstret);
+`endif
                 $display("  Sum of Instr Types = Retired: %s",
                     ((EXU.perf_alu_r_cnt + EXU.perf_alu_i_cnt + EXU.perf_load_cnt + 
                       EXU.perf_store_cnt + EXU.perf_branch_cnt + EXU.perf_jal_cnt + 

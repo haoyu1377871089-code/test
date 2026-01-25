@@ -213,6 +213,7 @@ module EXU (
                 WAIT_LSU: perf_exu_wait_lsu_cycles <= perf_exu_wait_lsu_cycles + 1;
                 default: ;
             endcase
+            // Debug warnings disabled for performance
 `endif
             case (state)
                 IDLE: begin
@@ -355,7 +356,8 @@ module EXU (
                                 3'b010: begin lsu_wmask <= 4'b1111; lsu_wdata <= rdata2; end
                                 default: lsu_req <= 0;
                             endcase
-                            state <= WRITEBACK; // 写操作不需要等待
+                            // 写操作也需要等待 LSU 完成，避免与后续指令冲突
+                            state <= WAIT_LSU;
                         end
                         
                         // 分支指令

@@ -259,11 +259,14 @@ always @(posedge clk or posedge rst) begin
             perf_lsu_load_cycles <= perf_lsu_load_cycles + {32'b0, lsu_cycle_counter};
             lsu_in_flight <= 1'b0;
 `endif
-        end else begin
-            rvalid_out <= 1'b0;
         end
+        // Note: Don't clear rvalid_out here, it's already cleared at the start of the else block (line 157)
+        // The previous 'else { rvalid_out <= 0 }' was overwriting the write completion signal
     end
   end
 end
+
+// ========== Debug Output (simulation only) - Disabled for performance ==========
+// Debug warnings are disabled by default. Uncomment if needed for debugging.
 
 endmodule

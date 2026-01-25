@@ -39,9 +39,12 @@ module IFU_AXI (
     output reg        rready
 );
 
-// 通过 DPI-C 从外部物理内存读取指令（AM/NPC 提供）
-// 综合时注释掉 DPI-C 函数
-// import "DPI-C" function int unsigned pmem_read(input int unsigned raddr);
+// ========== 状态机定义 ==========
+localparam IFU_IDLE    = 2'd0;  // 空闲，等待请求
+localparam IFU_WAIT_AR = 2'd1;  // 等待地址通道握手
+localparam IFU_WAIT_R  = 2'd2;  // 等待数据响应
+
+reg [1:0] ifu_state;
 
 // ========== 性能计数器 (仅仿真) ==========
 `ifdef SIMULATION
@@ -51,91 +54,101 @@ module IFU_AXI (
     reg [63:0] perf_ifu_stall_arb_cycles; // 等待仲裁的周期数 (arvalid && !arready)
 `endif
 
-reg [31:0] addr_stage1;
-reg        req_stage1;
-
+// ========== 主状态机 ==========
 always @(posedge clk or posedge rst) begin
-  if (rst) begin
-    addr_stage1 <= 32'h0;
-    req_stage1  <= 1'b0;
-    rvalid_out  <= 1'b0;
-    rdata_out   <= 32'h0;
-    
-    // 写通道信号全部置为0（IFU只读）
-    awaddr <= 32'h0;
-    awvalid <= 1'b0;
-    wdata <= 32'h0;
-    wstrb <= 4'h0;
-    wvalid <= 1'b0;
-    bready <= 1'b0;
-    
-    // 读通道信号初始化
-    araddr <= 32'h0;
-    arvalid <= 1'b0;
-    rready <= 1'b0;
+    if (rst) begin
+        ifu_state <= IFU_IDLE;
+        rvalid_out <= 1'b0;
+        rdata_out <= 32'h0;
+        
+        // 写通道信号全部置为0（IFU只读）
+        awaddr <= 32'h0;
+        awvalid <= 1'b0;
+        wdata <= 32'h0;
+        wstrb <= 4'h0;
+        wvalid <= 1'b0;
+        bready <= 1'b0;
+        
+        // 读通道信号初始化
+        araddr <= 32'h0;
+        arvalid <= 1'b0;
+        rready <= 1'b0;
 `ifdef SIMULATION
-    // 初始化性能计数器
-    perf_ifu_fetch_cnt <= 64'h0;
-    perf_ifu_req_cycles <= 64'h0;
-    perf_ifu_wait_cycles <= 64'h0;
-    perf_ifu_stall_arb_cycles <= 64'h0;
-`endif
-  end else begin
-    // 写通道信号始终为0（IFU只读）
-    awaddr <= 32'h0;
-    awvalid <= 1'b0;
-    wdata <= 32'h0;
-    wstrb <= 4'h0;
-    wvalid <= 1'b0;
-    bready <= 1'b0;
-    
-    // 1级流水线：把请求与地址打一拍
-    addr_stage1 <= addr;
-    req_stage1  <= req;
-
-    // 下一拍输出有效与数据，实现1周期读延迟
-    // rvalid_out <= req_stage1;
-    // if (req_stage1) begin
-    //   rdata_out <= 32'h0; // pmem_read(...);
-    // end
-    
-    // AXI4-Lite握手信号（简化处理，立即响应）
-    if (req) begin
-      araddr <= addr;
-      arvalid <= 1'b1;
-      rready <= 1'b1;
-      rvalid_out <= 1'b0; // 等待AXI响应
-    end else if (arvalid && arready) begin
-      arvalid <= 1'b0;
-    end 
-    
-    if (rvalid && rready) begin
-      rready <= 1'b0;
-      rdata_out <= rdata; // 从AXI读取数据
-      rvalid_out <= 1'b1; // 输出有效
-`ifdef SIMULATION
-      perf_ifu_fetch_cnt <= perf_ifu_fetch_cnt + 1; // 成功取指
+        // 初始化性能计数器
+        perf_ifu_fetch_cnt <= 64'h0;
+        perf_ifu_req_cycles <= 64'h0;
+        perf_ifu_wait_cycles <= 64'h0;
+        perf_ifu_stall_arb_cycles <= 64'h0;
 `endif
     end else begin
-      rvalid_out <= 1'b0;
-    end
-
+        // 写通道信号始终为0（IFU只读）
+        awaddr <= 32'h0;
+        awvalid <= 1'b0;
+        wdata <= 32'h0;
+        wstrb <= 4'h0;
+        wvalid <= 1'b0;
+        bready <= 1'b0;
+        
+        // 默认：rvalid_out 是单周期脉冲
+        rvalid_out <= 1'b0;
+        
+        case (ifu_state)
+            IFU_IDLE: begin
+                if (req) begin
+                    araddr <= addr;
+                    arvalid <= 1'b1;
+                    rready <= 1'b1;
+                    ifu_state <= IFU_WAIT_AR;
 `ifdef SIMULATION
-    // 性能计数：统计各种状态周期
-    if (req) perf_ifu_req_cycles <= perf_ifu_req_cycles + 1;
-    if (arvalid && !arready) perf_ifu_stall_arb_cycles <= perf_ifu_stall_arb_cycles + 1;
-    if (arvalid || rready) perf_ifu_wait_cycles <= perf_ifu_wait_cycles + 1;
+                    perf_ifu_req_cycles <= perf_ifu_req_cycles + 1;
 `endif
-  end
-end
-
-// 断言：确保写通道信号始终为0
-always @(posedge clk) begin
-    if (!rst) begin
-        // assert(awvalid == 1'b0) else $error("IFU awvalid should always be 0");
-        // assert(wvalid == 1'b0) else $error("IFU wvalid should always be 0");
-        // assert(bready == 1'b0) else $error("IFU bready should always be 0");
+                end
+            end
+            
+            IFU_WAIT_AR: begin
+                if (arready) begin
+                    arvalid <= 1'b0;  // 地址握手完成
+                    ifu_state <= IFU_WAIT_R;
+                end
+`ifdef SIMULATION
+                if (!arready) perf_ifu_stall_arb_cycles <= perf_ifu_stall_arb_cycles + 1;
+                perf_ifu_wait_cycles <= perf_ifu_wait_cycles + 1;
+`endif
+            end
+            
+            IFU_WAIT_R: begin
+                if (rvalid) begin
+                    rready <= 1'b0;
+                    rdata_out <= rdata;
+                    rvalid_out <= 1'b1;  // 输出数据有效脉冲
+                    ifu_state <= IFU_IDLE;
+`ifdef SIMULATION
+                    perf_ifu_fetch_cnt <= perf_ifu_fetch_cnt + 1;
+`endif
+                end
+`ifdef SIMULATION
+                perf_ifu_wait_cycles <= perf_ifu_wait_cycles + 1;
+`endif
+            end
+            
+            default: begin
+                ifu_state <= IFU_IDLE;
+            end
+        endcase
     end
 end
+
+// ========== Debug Output (simulation only) ==========
+// Note: Debug output disabled for performance. Uncomment for debugging.
+// `ifdef SIMULATION
+// always @(posedge clk) begin
+//     if (!rst) begin
+//         if (req && ifu_state == IFU_IDLE)
+//             $display("[IFU_AXI @%0t] REQ addr=%h", $time, addr);
+//         if (rvalid && rready)
+//             $display("[IFU_AXI @%0t] RESP data=%h", $time, rdata);
+//     end
+// end
+// `endif
 
 endmodule

@@ -114,10 +114,9 @@ always @(*) begin
             // IFU获得总线使用权
             granted_master = 2'b00;
             // 检查当前事务是否完成
-            if ((m0_arvalid && m0_arready && !m0_rvalid) ||  // 读地址通道完成
-                (m0_awvalid && m0_awready && !m0_bvalid) ||  // 写地址通道完成
-                (m0_rvalid && m0_rready) ||                   // 读数据通道完成
-                (m0_bvalid && m0_bready)) begin                // 写响应通道完成
+            // 注意：必须等待整个事务完成（数据/响应握手），不能只看地址握手
+            if ((m0_rvalid && m0_rready) ||    // 读数据通道完成
+                (m0_bvalid && m0_bready)) begin // 写响应通道完成
                 // IFU事务完成，返回空闲状态
                 arb_state_next = ARB_IDLE;
             end else begin
@@ -130,10 +129,9 @@ always @(*) begin
             // LSU获得总线使用权
             granted_master = 2'b01;
             // 检查当前事务是否完成
-            if ((m1_arvalid && m1_arready && !m1_rvalid) ||  // 读地址通道完成
-                (m1_awvalid && m1_awready && !m1_bvalid) ||  // 写地址通道完成
-                (m1_rvalid && m1_rready) ||                   // 读数据通道完成
-                (m1_bvalid && m1_bready)) begin                // 写响应完成
+            // 注意：必须等待整个事务完成（数据/响应握手），不能只看地址握手
+            if ((m1_rvalid && m1_rready) ||    // 读数据通道完成
+                (m1_bvalid && m1_bready)) begin // 写响应完成
                 // LSU事务完成，返回空闲状态
                 arb_state_next = ARB_IDLE;
             end else begin
@@ -242,5 +240,8 @@ always @(*) begin
         end
     endcase
 end
+
+// ========== Debug Output (simulation only) - Disabled for performance ==========
+// Debug warnings are disabled by default. Uncomment if needed for debugging.
 
 endmodule
