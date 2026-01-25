@@ -11,8 +11,9 @@ module MEM (
     output reg [31:0] mem_rdata // 从内存读取的数据
 );
 // 通过 DPI-C 与 C++ 侧物理内存/设备交互（MMIO/外部内存）
-import "DPI-C" function int unsigned pmem_read(input int unsigned raddr);
-import "DPI-C" function void pmem_write(input int unsigned waddr, input int unsigned wdata, input byte unsigned wmask);
+// 综合时注释掉 DPI-C 函数
+// import "DPI-C" function int unsigned pmem_read(input int unsigned raddr);
+// import "DPI-C" function void pmem_write(input int unsigned waddr, input int unsigned wdata, input byte unsigned wmask);
 
 // ========= 数据存储器（DMEM，256x32b，组合读、时序写） =========
 localparam DMEM_BASE  = 32'h8000_0000;
@@ -57,7 +58,7 @@ always @(*) begin
     if (in_dmem) begin
       mem_rdata = dmem_rdata1;
     end else begin
-      mem_rdata = pmem_read(mem_addr);
+      mem_rdata = 32'h0; // pmem_read(...);
     end
   end else begin
     mem_rdata = 32'h0;
@@ -78,7 +79,7 @@ always @(posedge clk or posedge rst) begin
         dmem_wdata <= apply_mask(dmem_rdata1, mem_wdata, mem_mask);
       end else begin
         dmem_wen   <= 1'b0;
-        pmem_write(mem_addr, mem_wdata, {4'b0000, mem_mask});
+         ; // pmem_write(...);
       end
     end else begin
       dmem_wen   <= 1'b0;

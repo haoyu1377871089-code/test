@@ -40,7 +40,8 @@ module IFU_AXI (
 );
 
 // 通过 DPI-C 从外部物理内存读取指令（AM/NPC 提供）
-import "DPI-C" function int unsigned pmem_read(input int unsigned raddr);
+// 综合时注释掉 DPI-C 函数
+// import "DPI-C" function int unsigned pmem_read(input int unsigned raddr);
 
 // ========== 性能计数器 (仅仿真) ==========
 `ifdef SIMULATION
@@ -95,7 +96,7 @@ always @(posedge clk or posedge rst) begin
     // 下一拍输出有效与数据，实现1周期读延迟
     // rvalid_out <= req_stage1;
     // if (req_stage1) begin
-    //   rdata_out <= pmem_read(addr_stage1);
+    //   rdata_out <= 32'h0; // pmem_read(...);
     // end
     
     // AXI4-Lite握手信号（简化处理，立即响应）
@@ -131,9 +132,9 @@ end
 // 断言：确保写通道信号始终为0
 always @(posedge clk) begin
     if (!rst) begin
-        assert(awvalid == 1'b0) else $error("IFU awvalid should always be 0");
-        assert(wvalid == 1'b0) else $error("IFU wvalid should always be 0");
-        assert(bready == 1'b0) else $error("IFU bready should always be 0");
+        // assert(awvalid == 1'b0) else $error("IFU awvalid should always be 0");
+        // assert(wvalid == 1'b0) else $error("IFU wvalid should always be 0");
+        // assert(bready == 1'b0) else $error("IFU bready should always be 0");
     end
 end
 

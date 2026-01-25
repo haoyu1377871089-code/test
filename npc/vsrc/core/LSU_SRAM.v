@@ -43,8 +43,9 @@ module LSU_SRAM (
 );
 
 // 通过 DPI-C 与 C++ 侧物理内存/设备交互（MMIO/外部内存）
-import "DPI-C" function int unsigned pmem_read(input int unsigned raddr);
-import "DPI-C" function void pmem_write(input int unsigned waddr, input int unsigned wdata, input byte unsigned wmask);
+// 综合时注释掉 DPI-C 函数
+// import "DPI-C" function int unsigned pmem_read(input int unsigned raddr);
+// import "DPI-C" function void pmem_write(input int unsigned waddr, input int unsigned wdata, input byte unsigned wmask);
 
 // ========== 性能计数器 (仅仿真) ==========
 `ifdef SIMULATION
@@ -97,7 +98,7 @@ always @(posedge clk or posedge rst) begin
     
     // 读操作：1周期延迟
     if (req_stage1 && !wen_stage1) begin
-      rdata_out <= pmem_read(addr_stage1);
+      rdata_out <= 32'h0; // pmem_read(...);
       rvalid_out <= 1'b1;
 `ifdef SIMULATION
       perf_lsu_load_cnt <= perf_lsu_load_cnt + 1;
@@ -107,7 +108,7 @@ always @(posedge clk or posedge rst) begin
     
     // 写操作：立即处理
     if (req && wen) begin
-      pmem_write(addr, wdata, {4'b0000, wmask});
+       ; // pmem_write(...);
       rvalid_out <= 1'b1; // 写完成
 `ifdef SIMULATION
       perf_lsu_store_cnt <= perf_lsu_store_cnt + 1;

@@ -146,21 +146,7 @@ ysyxSoC 提供了外设的空壳 (`perip/`), 需补充 RTL 实现：
 3.  **VGA**: 实现帧缓冲读取与时序生成。
 4.  **SPI XIP**: 在 SPI 控制器中实现自动读取 Flash 的逻辑 (Hardware Fetch)。
 
-### 5.3 开发任务清单
 
-**已完成**:
-- [x] 配置 `riscv32e-ysyxsoc` AM 环境。
-- [x] 修复 `LSU_SRAM` 的 AXI 握手逻辑。
-- [x] 实现 Flash 和 MROM 的 C++ 仿真模型 (DPI-C)。
-- [x] 成功运行 `flash-test`。
-
-**待办 (To-Do)**:
-- [ ] **接口升级**: 将 NPC 接口从 AXI4-Lite 升级为全功能 AXI4。
-- [ ] **外设实现**: 编写 GPIO, PS/2, VGA 的 Verilog 代码。
-- [ ] **驱动开发**: 在 AM 中添加对应外设的驱动程序。
-- [ ] **Flash XIP**: 实现 SPI 控制器的 XIP 模式，使 NPC 能直接从 Flash 启动 (`0x30000000`)。
-- [ ] **大容量存储**: 实现 PSRAM/SDRAM 控制器与仿真模型。
-- [ ] **系统集成**: 移植 RT-Thread 或其他 OS。
 
 ---
 *Created by Gemini CLI - 2025*

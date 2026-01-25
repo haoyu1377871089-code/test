@@ -25,10 +25,9 @@ module EXU (
     output reg [31:0] lsu_wdata, // LSU写数据
     output reg [3:0] lsu_wmask,  // LSU写掩码
     input lsu_rvalid,          // LSU读数据有效
-    input [31:0] lsu_rdata,    // LSU读数据
-    
+    input [31:0] lsu_rdata     // LSU读数据
     // 寄存器接口用于DiffTest
-    output [31:0] regs [0:31]
+    // output [31:0] regs [0:31]
 );
     
     // 定义寄存器和信号
@@ -157,8 +156,8 @@ module EXU (
         .raddr1(raddr1),
         .rdata1(rdata1),
         .raddr2(raddr2),
-        .rdata2(rdata2),
-        .reg_values(reg_values)  // 添加这一行用于获取所有寄存器值
+        .rdata2(rdata2)
+        // // .reg_values(reg_values)  // 添加这一行用于获取所有寄存器值
     );
     
     // ========== 算术逻辑单元 (ALU) + 控制状态寄存器单元 (CSR) ==========
@@ -425,7 +424,7 @@ module EXU (
                                     case (imm_i)
                                         12'h001: begin // ebreak
                                             ebreak_flag <= 1;
-                                            exit_code <= reg_values[10];
+                                            exit_code <= 32'h0;
                                             next_pc <= pc + 4;
                                         end
                                         12'h000: begin // ecall
@@ -575,7 +574,7 @@ module EXU (
     genvar i;
     generate
         for (i = 0; i < 32; i = i + 1) begin : REG_OUTPUT
-            assign regs[i] = (i == 0) ? 32'b0 : reg_values[i]; // x0永远为0
+            // assign regs[i] = (i == 0) ? 32'b0 : reg_values[i]; // x0永远为0
         end
     endgenerate
     

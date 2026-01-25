@@ -40,7 +40,8 @@ module IFU_SRAM (
 );
 
 // 通过 DPI-C 从外部物理内存读取指令（AM/NPC 提供）
-import "DPI-C" function int unsigned pmem_read(input int unsigned raddr);
+// 综合时注释掉 DPI-C 函数
+// import "DPI-C" function int unsigned pmem_read(input int unsigned raddr);
 
 // ========== 性能计数器 (仅仿真) ==========
 `ifdef SIMULATION
@@ -94,7 +95,7 @@ always @(posedge clk or posedge rst) begin
 
     rvalid_out <= req_stage1;
     if (req_stage1) begin
-      rdata_out <= pmem_read(addr_stage1);
+      rdata_out <= 32'h0; // pmem_read(...);
 `ifdef SIMULATION
       perf_ifu_fetch_cnt <= perf_ifu_fetch_cnt + 1; // 成功取指
 `endif

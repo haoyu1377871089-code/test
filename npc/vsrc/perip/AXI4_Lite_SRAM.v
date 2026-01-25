@@ -14,8 +14,9 @@ module AXI4_Lite_SRAM (
 );
 
 // 通过 DPI-C 与外部物理内存交互
-import "DPI-C" function int unsigned pmem_read(input int unsigned raddr);
-import "DPI-C" function void pmem_write(input int unsigned waddr, input int unsigned wdata, input byte unsigned wmask);
+// 综合时注释掉 DPI-C 函数
+// import "DPI-C" function int unsigned pmem_read(input int unsigned raddr);
+// import "DPI-C" function void pmem_write(input int unsigned waddr, input int unsigned wdata, input byte unsigned wmask);
 
 // AXI4-Lite状态机状态定义
 localparam AXI4_IDLE  = 2'b00;
@@ -121,7 +122,7 @@ always @(posedge clk or posedge rst) begin
                     // 读操作：立即执行读操作
                     state <= AXI4_DATA;
                     // 执行读操作
-                    rdata <= pmem_read(addr_reg);
+                    rdata <= 32'h0; // pmem_read(...);
                     rresp <= `AXI4_RESP_OKAY;
                     rvalid <= 1'b1;
                 end
@@ -135,7 +136,7 @@ always @(posedge clk or posedge rst) begin
                     // 写操作：执行写操作并发送响应
                     if (!bvalid) begin
                         // 执行写操作
-                        pmem_write(addr_reg, wdata_reg, {4'b0000, wstrb_reg});
+                         ; // pmem_write(...);
                         bresp <= `AXI4_RESP_OKAY;
                         bvalid <= 1'b1;
                         state <= AXI4_RESP;

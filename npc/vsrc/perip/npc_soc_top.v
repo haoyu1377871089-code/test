@@ -697,8 +697,11 @@ always @(posedge clk or posedge rst) begin
             
             // 一致性检查
             $display("[Consistency Check]");
-            $display("  IFU Fetch = Retired Instrs: %s", 
-                (u_ifu.perf_ifu_fetch_cnt == EXU.perf_minstret) ? "PASS" : "FAIL");
+            // IFU Fetch 允许比 Retired 多1（ebreak时有预取）
+            $display("  IFU Fetch ~= Retired Instrs: %s (diff=%0d)", 
+                ((u_ifu.perf_ifu_fetch_cnt == EXU.perf_minstret) || 
+                 (u_ifu.perf_ifu_fetch_cnt == EXU.perf_minstret + 1)) ? "PASS" : "FAIL",
+                u_ifu.perf_ifu_fetch_cnt - EXU.perf_minstret);
             $display("  Sum of Instr Types = Retired: %s",
                 ((EXU.perf_alu_r_cnt + EXU.perf_alu_i_cnt + EXU.perf_load_cnt + 
                   EXU.perf_store_cnt + EXU.perf_branch_cnt + EXU.perf_jal_cnt + 

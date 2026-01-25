@@ -13,10 +13,9 @@ module RegisterFile #(parameter ADDR_WIDTH = 5, parameter DATA_WIDTH = 32) (
   
   // 读取端口2
   input [ADDR_WIDTH-1:0] raddr2,
-  output [DATA_WIDTH-1:0] rdata2,
-  
+  output [DATA_WIDTH-1:0] rdata2
   // 添加寄存器值输出接口用于DiffTest
-  output [DATA_WIDTH-1:0] reg_values [0:(2**ADDR_WIDTH)-1]
+  // output [DATA_WIDTH-1:0] reg_values [0:(2**ADDR_WIDTH)-1]
 );
   // 寄存器文件定义
   reg [DATA_WIDTH-1:0] rf [2**ADDR_WIDTH-1:0];
@@ -46,7 +45,7 @@ module RegisterFile #(parameter ADDR_WIDTH = 5, parameter DATA_WIDTH = 32) (
   genvar j;
   generate
     for (j = 0; j < 2**ADDR_WIDTH; j = j + 1) begin : REG_VALUE_CONNECT
-      assign reg_values[j] = rf[j];
+      // assign reg_values[j] = rf[j];
     end
   endgenerate
   

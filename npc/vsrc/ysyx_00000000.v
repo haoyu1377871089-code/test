@@ -77,7 +77,9 @@ module ysyx_00000000 (
     output [3:0]  io_slave_rid
 );
 
+`ifdef SIMULATION
     import "DPI-C" function void npc_trap(input int exit_code);
+`endif
 
     // ------------------------------------------------------
     // Slave Interface (Unused - Tied Off)
@@ -213,8 +215,8 @@ module ysyx_00000000 (
         .lsu_rvalid  (lsu_rvalid),
         .lsu_rdata   (lsu_rdata),
         .ebreak_flag (ebreak_detected),
-        .exit_code   (exit_value),
-        .regs        (exu_regs)
+        .exit_code   (exit_value)
+        // .regs (exu_regs)
     );
 
     // IFU_AXI
@@ -548,8 +550,11 @@ module ysyx_00000000 (
                 
                 // 一致性检查
                 $display("[Consistency Check]");
-                $display("  IFU Fetch = Retired Instrs: %s", 
-                    (u_ifu.perf_ifu_fetch_cnt == EXU.perf_minstret) ? "PASS" : "FAIL");
+                // IFU Fetch 允许比 Retired 多1（ebreak时有预取）
+                $display("  IFU Fetch ~= Retired Instrs: %s (diff=%0d)", 
+                    ((u_ifu.perf_ifu_fetch_cnt == EXU.perf_minstret) || 
+                     (u_ifu.perf_ifu_fetch_cnt == EXU.perf_minstret + 1)) ? "PASS" : "FAIL",
+                    u_ifu.perf_ifu_fetch_cnt - EXU.perf_minstret);
                 $display("  Sum of Instr Types = Retired: %s",
                     ((EXU.perf_alu_r_cnt + EXU.perf_alu_i_cnt + EXU.perf_load_cnt + 
                       EXU.perf_store_cnt + EXU.perf_branch_cnt + EXU.perf_jal_cnt + 
@@ -564,7 +569,9 @@ module ysyx_00000000 (
                 $display("====================================================");
                 $display("");
 `endif
+`ifdef SIMULATION
                 npc_trap(exit_value);
+`endif
             end
         end
     end

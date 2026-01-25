@@ -43,8 +43,9 @@ module LSU_AXI (
 );
 
 // 通过 DPI-C 与 C++ 侧物理内存/设备交互（MMIO/外部内存）
-import "DPI-C" function int unsigned pmem_read(input int unsigned raddr);
-import "DPI-C" function void pmem_write(input int unsigned waddr, input int unsigned wdata, input byte unsigned wmask);
+// 综合时注释掉 DPI-C 函数
+// import "DPI-C" function int unsigned pmem_read(input int unsigned raddr);
+// import "DPI-C" function void pmem_write(input int unsigned waddr, input int unsigned wdata, input byte unsigned wmask);
 
 // ========== 性能计数器 (仅仿真) ==========
 `ifdef SIMULATION
@@ -101,8 +102,8 @@ RegisterFile #(.ADDR_WIDTH(8), .DATA_WIDTH(32)) DMEM (
   .clk(clk), .rst(rst),
   .wdata(dmem_wdata), .waddr(dmem_waddr), .wen(dmem_wen),
   .raddr1(dmem_idx), .rdata1(dmem_rdata1),
-  .raddr2(dmem_idx_stage1), .rdata2(dmem_rdata2),
-  .reg_values() // 未使用的输出端口
+  .raddr2(dmem_idx_stage1), .rdata2(dmem_rdata2)
+  // .reg_values() // 未使用的输出端口
 );
 
 // 流水线逻辑：实现1周期读延迟
@@ -183,7 +184,7 @@ always @(posedge clk or posedge rst) begin
         dmem_wdata <= apply_mask(dmem_rdata1, wdata, wmask);
       end else begin
         dmem_wen <= 1'b0;
-        pmem_write(addr, wdata, {4'b0000, wmask});
+         ; // pmem_write(...);
       end
     end else begin
       dmem_wen <= 1'b0;
@@ -236,7 +237,7 @@ always @(posedge clk or posedge rst) begin
             bready <= 1'b0;
             rvalid_out <= 1'b1; // Write Done
 `ifdef SIMULATION
-            perf_lsu_store_cycles <= perf_lsu_store_cycles + lsu_cycle_counter;
+            perf_lsu_store_cycles <= perf_lsu_store_cycles + {32'b0, lsu_cycle_counter};
             lsu_in_flight <= 1'b0;
 `endif
         end
@@ -255,7 +256,7 @@ always @(posedge clk or posedge rst) begin
             endcase
             rvalid_out <= 1'b1; // Read Done
 `ifdef SIMULATION
-            perf_lsu_load_cycles <= perf_lsu_load_cycles + lsu_cycle_counter;
+            perf_lsu_load_cycles <= perf_lsu_load_cycles + {32'b0, lsu_cycle_counter};
             lsu_in_flight <= 1'b0;
 `endif
         end else begin

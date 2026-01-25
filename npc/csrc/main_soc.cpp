@@ -11,6 +11,9 @@ extern "C" void flash_load_program(const char* filename, uint32_t flash_offset);
 extern "C" bool npc_request_exit();
 extern "C" void npc_set_exit_after_frames(int n);
 
+// NVBoard's UART divisor counter - set to large value to disable NVBoard UART sampling
+extern int16_t uart_divisor_cnt;
+
 // NVBoard auto-generated function declaration
 void nvboard_bind_all_pins(VysyxSoCFull* top);
 
@@ -97,6 +100,10 @@ int main(int argc, char **argv) {
     // Initialize NVBoard
     nvboard_bind_all_pins(top);
     nvboard_init();
+    
+    // Disable NVBoard's UART sampling to prevent duplicate character output
+    // We use our own uart_tick() for stdout output
+    uart_divisor_cnt = 32767;  // Set to max int16_t to effectively disable
 
     top->reset = 1;
     top->clock = 0;
@@ -111,15 +118,17 @@ int main(int argc, char **argv) {
         top->eval();
         
         // Capture UART TX output (on clock rising edge, after reset)
+        // This outputs to stdout for console/pipe usage
         if (top->clock && time > 200) {
             uart_tick(top->externalPins_uart_tx);
         }
         
-        // Update NVBoard for UART sampling and other peripherals
-        // Call every half-cycle
-        if (time > 5000000) {  // Wait for software to initialize UART first
-            nvboard_update();
-        }
+        // NVBoard update is disabled to prevent duplicate UART output
+        // NVBoard's tx_receive() would cause characters to print twice
+        // TODO: If VGA/keyboard needed, modify NVBoard to disable UART or use separate flag
+        // if (time > 5000000 && time % 1000 == 0) {
+        //     nvboard_update();
+        // }
         
         if (time < 50000) tfp->dump(time);  // 只保存前50000周期（足够测试）
         time++;
