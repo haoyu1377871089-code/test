@@ -45,6 +45,7 @@ static void bench_prepare(Result *res) {
 
 static void bench_reset() {
   hbrk = (void *)ROUNDUP(heap.start, 8);
+  printf("[RESET] hbrk=%p, heap.start=%p\n", hbrk, heap.start);
 }
 
 static void bench_done(Result *res) {
@@ -60,8 +61,11 @@ static const char *bench_check(Benchmark *bench) {
 }
 
 static void run_once(Benchmark *b, Result *res) {
+  printf("[RUN_ONCE] name=%s prepare=%p\n", current->name, current->prepare);
   bench_reset();       // reset malloc state
+  printf("[RUN_ONCE] calling prepare\n");
   current->prepare();  // call bechmark's prepare function
+  printf("[RUN_ONCE] prepare done\n");
   bench_prepare(res);  // clean everything, start timer
   current->run();      // run it
   bench_done(res);     // collect results
@@ -158,9 +162,15 @@ void* bench_alloc(size_t size) {
   size  = (size_t)ROUNDUP(size, 8);
   char *old = hbrk;
   hbrk += size;
+  uintptr_t used = (uintptr_t)hbrk - (uintptr_t)heap.start;
+  printf("\n[ALLOC] size=%d, heap.start=%p, hbrk=%p, used=%d, mlim=%d\n", 
+         (int)size, heap.start, hbrk, (int)used, (int)setting->mlim);
   assert((uintptr_t)heap.start <= (uintptr_t)hbrk && (uintptr_t)hbrk < (uintptr_t)heap.end);
   for (uint64_t *p = (uint64_t *)old; p != (uint64_t *)hbrk; p ++) {
     *p = 0;
+  }
+  if (used > setting->mlim) {
+    printf("[ALLOC] FAIL: used (%d) > mlim (%d)\n", (int)used, (int)setting->mlim);
   }
   assert((uintptr_t)hbrk - (uintptr_t)heap.start <= setting->mlim);
   return old;
