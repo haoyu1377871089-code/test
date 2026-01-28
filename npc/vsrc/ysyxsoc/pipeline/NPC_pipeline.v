@@ -241,8 +241,9 @@ module NPC_pipeline (
     // MEM 阶段的目标寄存器
     wire [4:0] mem_rd = ex_mem_rd;
     wire mem_writes_reg = ex_mem_valid && ex_mem_reg_wen && (mem_rd != 5'b0);
-    // MEM 阶段可以转发的条件：LSU 输出有效
-    wire mem_can_forward = lsu_out_valid && ex_mem_reg_wen && (mem_rd != 5'b0);
+    // MEM 阶段可以转发的条件：EX/MEM 有效，LSU 输出有效
+    // 注意：必须同时检查 ex_mem_valid 以确保 ex_mem_rd 是当前指令的目标寄存器
+    wire mem_can_forward = ex_mem_valid && lsu_out_valid && ex_mem_reg_wen && (mem_rd != 5'b0);
     // MEM 阶段的转发数据：来自 LSU 的输出结果
     wire [31:0] mem_fwd_data = lsu_out_result;
     

@@ -105,15 +105,16 @@ module LSU_pipeline (
     // ========== Load 数据提取 ==========
     // 注意: LSU_AXI4 已经根据地址偏移对数据进行了对齐（右移）
     // 所以这里不需要再根据地址偏移提取，直接从低位提取即可
+    // 重要: 使用锁存的 mem_result 而不是 mem_rdata，因为在 S_DONE 状态时 mem_rdata 可能已变化
     reg [31:0] load_result;
     always @(*) begin
         case (funct3_reg)
-            3'b000: load_result = {{24{mem_rdata[7]}}, mem_rdata[7:0]};   // LB
-            3'b001: load_result = {{16{mem_rdata[15]}}, mem_rdata[15:0]}; // LH
-            3'b010: load_result = mem_rdata;                              // LW
-            3'b100: load_result = {24'b0, mem_rdata[7:0]};                // LBU
-            3'b101: load_result = {16'b0, mem_rdata[15:0]};               // LHU
-            default: load_result = mem_rdata;
+            3'b000: load_result = {{24{mem_result[7]}}, mem_result[7:0]};   // LB
+            3'b001: load_result = {{16{mem_result[15]}}, mem_result[15:0]}; // LH
+            3'b010: load_result = mem_result;                              // LW
+            3'b100: load_result = {24'b0, mem_result[7:0]};                // LBU
+            3'b101: load_result = {16'b0, mem_result[15:0]};               // LHU
+            default: load_result = mem_result;
         endcase
     end
     
