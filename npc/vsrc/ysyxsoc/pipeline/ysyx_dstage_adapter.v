@@ -95,46 +95,78 @@ module ysyx_00000000 (
     // ICache 会发出 burst 请求 (16B = 4 words)，D-stage 接口只支持单拍
     // 需要将一个 burst 请求拆分为 4 个单拍请求
     //
-    // 时序：
-    //   - icache_mem_req=1 触发开始，立即输出第一个请求
-    //   - 等待 respValid，收到后进入下一个 beat
-    //   - 4 个 beat 完成后结束
+    // 重要：D-stage MemBridge 使用请求-响应协议
+    //   - io_ifu_reqValid 只在需要新响应时为高（单周期脉冲或等待接受）
+    //   - 不能在整个 burst 期间持续为高，否则会与 LSU 请求冲突
+    //
+    // 状态机：
+    //   IDLE -> REQ -> WAIT_RESP -> (REQ or IDLE)
     
+    localparam IFU_IDLE      = 2'd0;
+    localparam IFU_REQ       = 2'd1;
+    localparam IFU_WAIT_RESP = 2'd2;
+    
+    reg [1:0] ifu_state;
     reg [1:0] icache_beat_cnt;
-    reg       icache_active;      // 正在进行 burst 传输
+    reg [31:0] icache_saved_addr;  // 保存 burst 起始地址
     
     // 地址计算
-    assign io_ifu_addr = icache_mem_addr + {icache_beat_cnt, 2'b00};
+    assign io_ifu_addr = icache_saved_addr + {icache_beat_cnt, 2'b00};
     
-    // 请求信号：在 burst 期间持续有效
-    // 立即响应 icache_mem_req，或在 active 期间持续请求
-    assign io_ifu_reqValid = icache_mem_req || icache_active;
+    // IFU 只在仲裁允许时发请求
+    wire ifu_can_req = (arb_state == ARB_IDLE && !lsu_req) || (arb_state == ARB_IFU);
+    
+    // 请求信号：只在 REQ 状态且仲裁允许时为高
+    assign io_ifu_reqValid = (ifu_state == IFU_REQ) && ifu_can_req;
     
     // 数据返回给 I-Cache
     assign icache_mem_rdata  = io_ifu_rdata;
-    assign icache_mem_rvalid = io_ifu_respValid && (icache_mem_req || icache_active);
-    assign icache_mem_rlast  = io_ifu_respValid && icache_active && (icache_beat_cnt == 2'd3);
+    assign icache_mem_rvalid = io_ifu_respValid && (ifu_state == IFU_WAIT_RESP);
+    assign icache_mem_rlast  = icache_mem_rvalid && (icache_beat_cnt == 2'd3);
     
     always @(posedge clk or posedge rst) begin
         if (rst) begin
+            ifu_state <= IFU_IDLE;
             icache_beat_cnt <= 2'd0;
-            icache_active <= 1'b0;
+            icache_saved_addr <= 32'd0;
         end else begin
-            if (icache_mem_req && !icache_active) begin
-                // I-Cache 发出新请求，开始 burst 传输
-                icache_active <= 1'b1;
-                icache_beat_cnt <= 2'd0;
-            end else if (icache_active && io_ifu_respValid) begin
-                // 收到一个响应
-                if (icache_beat_cnt == 2'd3) begin
-                    // 最后一个 beat 完成
-                    icache_active <= 1'b0;
-                    icache_beat_cnt <= 2'd0;
-                end else begin
-                    // 进入下一个 beat
-                    icache_beat_cnt <= icache_beat_cnt + 1;
+            case (ifu_state)
+                IFU_IDLE: begin
+                    // 开始新的 IFU burst 请求
+                    if (icache_mem_req) begin
+                        // I-Cache 发出新的 burst 请求
+                        ifu_state <= IFU_REQ;
+                        icache_beat_cnt <= 2'd0;
+                        icache_saved_addr <= icache_mem_addr;
+                    end
                 end
-            end
+                
+                IFU_REQ: begin
+                    // 等待仲裁允许并发送请求
+                    if (ifu_can_req) begin
+                        // 请求已发送，进入等待响应状态
+                        ifu_state <= IFU_WAIT_RESP;
+                    end
+                    // 否则继续在 REQ 状态等待仲裁
+                end
+                
+                IFU_WAIT_RESP: begin
+                    if (io_ifu_respValid) begin
+                        // 收到一个响应
+                        if (icache_beat_cnt == 2'd3) begin
+                            // 最后一个 beat 完成
+                            ifu_state <= IFU_IDLE;
+                            icache_beat_cnt <= 2'd0;
+                        end else begin
+                            // 进入下一个 beat
+                            icache_beat_cnt <= icache_beat_cnt + 1;
+                            ifu_state <= IFU_REQ;
+                        end
+                    end
+                end
+                
+                default: ifu_state <= IFU_IDLE;
+            endcase
         end
     end
 `else
@@ -145,15 +177,73 @@ module ysyx_00000000 (
     assign ifu_rvalid      = io_ifu_respValid;
 `endif
 
-    // LSU 请求转换 (直接映射)
+    // ========== IFU/LSU 仲裁 ==========
+    // D-stage MemBridge 在 IFU 和 LSU 同时请求时会出错
+    // 关键约束：io_ifu_reqValid 和 io_lsu_reqValid 不能同时为高
+    //
+    // 简化策略：
+    // - IFU 和 LSU 串行化请求
+    // - 谁先请求谁先处理
+    // - 使用单一状态机跟踪当前活动的通道
+    
+    localparam ARB_IDLE  = 2'd0;  // 空闲，等待请求
+    localparam ARB_IFU   = 2'd1;  // IFU 正在使用总线
+    localparam ARB_LSU   = 2'd2;  // LSU 正在使用总线
+    
+    reg [1:0] arb_state;
+    
+    // IFU 正在使用总线 = 在 IFU 状态或 IFU 正在发请求
+    wire ifu_using_bus = (arb_state == ARB_IFU);
+    // LSU 正在使用总线 = 在 LSU 状态
+    wire lsu_using_bus = (arb_state == ARB_LSU);
+    
+    always @(posedge clk or posedge rst) begin
+        if (rst) begin
+            arb_state <= ARB_IDLE;
+        end else begin
+            case (arb_state)
+                ARB_IDLE: begin
+                    // LSU 优先级更高
+                    if (lsu_req) begin
+                        arb_state <= ARB_LSU;
+                    end else if (ifu_state == IFU_REQ) begin
+                        arb_state <= ARB_IFU;
+                    end
+                end
+                ARB_IFU: begin
+                    // IFU 正在使用总线
+                    if (io_ifu_respValid) begin
+                        // 收到响应
+                        if (icache_beat_cnt == 2'd3) begin
+                            // burst 完成
+                            arb_state <= ARB_IDLE;
+                        end
+                        // 如果 burst 未完成，保持 IFU 状态
+                    end
+                end
+                ARB_LSU: begin
+                    // LSU 正在使用总线
+                    if (io_lsu_respValid) begin
+                        // LSU 完成
+                        arb_state <= ARB_IDLE;
+                    end
+                end
+                default: arb_state <= ARB_IDLE;
+            endcase
+        end
+    end
+    
+    // LSU 请求转换
+    // LSU 只在仲裁允许时发请求
+    wire lsu_can_req = (arb_state == ARB_IDLE) || (arb_state == ARB_LSU);
     assign io_lsu_addr     = lsu_addr;
-    assign io_lsu_reqValid = lsu_req;
+    assign io_lsu_reqValid = lsu_req && lsu_can_req;
     assign io_lsu_size     = 2'b10;  // 默认字访问 (4 bytes)
     assign io_lsu_wen      = lsu_wen;
     assign io_lsu_wdata    = lsu_wdata;
     assign io_lsu_wmask    = lsu_wmask;
     assign lsu_rdata       = io_lsu_rdata;
-    assign lsu_rvalid      = io_lsu_respValid;
+    assign lsu_rvalid      = io_lsu_respValid && lsu_using_bus;
 
     // Pipeline Core
     NPC_pipeline u_npc (
