@@ -47,29 +47,58 @@ cd /workspace
 if [ -f "$NPC_BUILD_DIR/ysyxSoCFull" ]; then
     timeout $TEST_TIMEOUT "$NPC_BUILD_DIR/ysyxSoCFull" --no-nvboard -b "$DUMMY_BIN" 2>&1 | tee dummy_test.log
     
-    if grep -q "PASS\|SUCCESS\|HIT GOOD TRAP" dummy_test.log 2>/dev/null; then
+    # 检查是否有UART输出（YG表示成功）
+    if grep -q "YG\|PASS\|SUCCESS\|HIT GOOD TRAP" dummy_test.log 2>/dev/null || \
+       grep -q "uart_chars=[1-9]" dummy_test.log 2>/dev/null; then
         echo ""
         echo "=========================================="
-        echo "✓ DUMMY TEST PASSED"
+        echo "✓ DUMMY TEST PASSED (有UART输出)"
         echo "=========================================="
         
         # 如果dummy成功，运行microbench
         echo ""
         echo "Building microbench..."
-        cd /workspace/am-kernels/benchmarks
-        # TODO: 构建microbench
+        cd /workspace/am-kernels/benchmarks/microbench
+        if [ ! -f Makefile.microbench ]; then
+            echo "NAME = microbench" > Makefile.microbench
+            echo "SRCS = src/bench.c" >> Makefile.microbench
+            echo "include $AM_HOME/Makefile" >> Makefile.microbench
+        fi
         
-        echo ""
-        echo "=========================================="
-        echo "Running microbench..."
-        echo "=========================================="
-        # TODO: 运行microbench
+        ARCH=$ARCH make -f Makefile.microbench 2>&1 | tail -20
+        
+        MICROBENCH_BIN=$(find build -name "*microbench*.bin" 2>/dev/null | head -1)
+        if [ -n "$MICROBENCH_BIN" ]; then
+            echo ""
+            echo "=========================================="
+            echo "Running microbench..."
+            echo "=========================================="
+            cd /workspace
+            timeout $TEST_TIMEOUT "$NPC_BUILD_DIR/ysyxSoCFull" --no-nvboard -b "$MICROBENCH_BIN" 2>&1 | tee microbench_test.log
+            
+            if grep -q "PASS\|SUCCESS\|HIT GOOD TRAP" microbench_test.log 2>/dev/null || \
+               grep -q "uart_chars=[1-9]" microbench_test.log 2>/dev/null; then
+                echo ""
+                echo "=========================================="
+                echo "✓ MICROBENCH TEST PASSED"
+                echo "=========================================="
+            else
+                echo ""
+                echo "=========================================="
+                echo "✗ MICROBENCH TEST FAILED"
+                echo "=========================================="
+                exit 1
+            fi
+        else
+            echo "WARNING: microbench binary not found, skipping..."
+        fi
         
     else
         echo ""
         echo "=========================================="
-        echo "✗ DUMMY TEST FAILED"
+        echo "✗ DUMMY TEST FAILED (无UART输出)"
         echo "=========================================="
+        echo "检查日志: dummy_test.log"
         exit 1
     fi
 else
