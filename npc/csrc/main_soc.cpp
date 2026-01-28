@@ -1,6 +1,8 @@
 #include "VysyxSoCFull.h"
 #include "verilated.h"
+#if VM_TRACE
 #include "verilated_vcd_c.h"
+#endif
 #include <iostream>
 #include <cstring>
 #include <signal.h>
@@ -110,9 +112,13 @@ int main(int argc, char **argv) {
     flash_load_program(imgPath, 0);
 
     VysyxSoCFull *top = new VysyxSoCFull;
+#if VM_TRACE
     VerilatedVcdC *tfp = new VerilatedVcdC;
     top->trace(tfp, 99);
     tfp->open("build_soc/trace.vcd");
+#else
+    VerilatedVcdC *tfp = nullptr;
+#endif
 
     // Initialize NVBoard (unless --no-gui)
 #ifdef USE_NVBOARD
@@ -151,7 +157,9 @@ int main(int argc, char **argv) {
         //     nvboard_update();
         // }
         
-        if (time < 50000) tfp->dump(time);  // 只保存前50000周期（足够测试）
+#if VM_TRACE
+        if (time < 50000 && tfp) tfp->dump(time);  // 只保存前50000周期（足够测试）
+#endif
         time++;
         
         if (time % 10000000 == 0) {
@@ -175,7 +183,12 @@ int main(int argc, char **argv) {
         nvboard_quit();
     }
 #endif
-    tfp->close();
+#if VM_TRACE
+    if (tfp) {
+        tfp->close();
+        delete tfp;
+    }
+#endif
     delete top;
     return 0;
 }
