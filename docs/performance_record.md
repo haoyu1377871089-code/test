@@ -9,153 +9,145 @@
 
 ## 综合信息 (Yosys 0.9)
 
-| 项目 | 数值 | 备注 |
-|------|------|------|
-| 目标综合频率 | 100 MHz（STA 通过） | OpenSTA 2.0.17：10 ns 周期下 slack 0.06 (MET)；`make sta` 或 `npc/scripts/sta/run_sta.sh`，Liberty 为 yosys_gates.lib 占位延时 |
-| 总单元数 (Cells) | 17,464 | 综合后的逻辑单元 |
-| 触发器 (DFF) | 1,587 | $_DFF_PP0_: 1436, $_DFF_PP1_: 4, $_DFF_P_: 147 |
-| AND 门 | 4,675 | $_AND_ |
-| OR 门 | 4,278 | $_OR_ |
-| MUX 门 | 6,235 | $_MUX_ |
-| XOR 门 | 474 | $_XOR_ |
-| NOT 门 | 215 | $_NOT_ |
-| Wire 数 | 3,762 | 29,714 bits |
+|| 项目 | 数值 | 备注 |
+||------|------|------|
+|| 目标综合频率 | 100 MHz（STA 通过） | OpenSTA 2.0.17：10 ns 周期下 slack 0.06 (MET)；`make sta` 或 `npc/scripts/sta/run_sta.sh`，Liberty 为 yosys_gates.lib 占位延时 |
+|| 总单元数 (Cells) | 17,464 | 综合后的逻辑单元 |
+|| 触发器 (DFF) | 1,587 | $_DFF_PP0_: 1436, $_DFF_PP1_: 4, $_DFF_P_: 147 |
+|| AND 门 | 4,675 | $_AND_ |
+|| OR 门 | 4,278 | $_OR_ |
+|| MUX 门 | 6,235 | $_MUX_ |
+|| XOR 门 | 474 | $_XOR_ |
+|| NOT 门 | 215 | $_NOT_ |
+|| Wire 数 | 3,762 | 29,714 bits |
 
 ## 性能数据记录
 
 ### 基线版本 (单周期 NPC + APB Delayer)
 
-| 测试时间 | Commit | 说明 | 仿真周期数 | 指令数 | IPC | CPI |
-|----------|--------|------|------------|--------|-----|-----|
-| 2026-01-25 | fe89758 | 初步: dummy (约23K指令) | 21,314,550 | 23,414 | 0.0011 | 910.33 |
-| 2026-01-25 | fe89758 | microbench (test): 单周期NPC + APB延迟校准 | 522,842,522 | 549,988 | 0.0011 | 950.64 |
+|| 测试时间 | Commit | 说明 | 仿真周期数 | 指令数 | IPC | CPI |
+||----------|--------|------|------------|--------|-----|-----|
+|| 2026-01-25 | fe89758 | 初步: dummy (约23K指令) | 21,314,550 | 23,414 | 0.0011 | 910.33 |
+|| 2026-01-25 | fe89758 | microbench (test): 单周期NPC + APB延迟校准 | 522,842,522 | 549,988 | 0.0011 | 950.64 |
 
-### I-Cache 启用版本
+### I-Cache 启用版本 (4B Cache Line)
 
-| 测试时间 | Commit | 说明 | 仿真周期数 | 指令数 | IPC | CPI |
-|----------|--------|------|------------|--------|-----|-----|
-| 2026-01-25 | WIP | dummy + ICache | ~4,000,000 | ~23K | ~0.018 | ~55 |
-| 2026-01-25 | WIP | microbench (test) + ICache (98.78% hit rate) | 30,438,401 | 550,084 | 0.018 | 55.33 |
+|| 测试时间 | Commit | 说明 | 仿真周期数 | 指令数 | IPC | CPI |
+||----------|--------|------|------------|--------|-----|-----|
+|| 2026-01-25 | WIP | dummy + ICache | ~4,000,000 | ~23K | ~0.018 | ~55 |
+|| 2026-01-25 | WIP | microbench (test) + ICache (98.78% hit rate) | 30,438,401 | 550,084 | 0.018 | 55.33 |
 
-### 详细性能计数器 (microbench test 规模)
+### I-Cache + AXI4 Burst (16B Cache Line)
+
+|| 测试时间 | Commit | 说明 | 仿真周期数 | 指令数 | IPC | CPI |
+||----------|--------|------|------------|--------|-----|-----|
+|| 2026-01-27 | 5974dd3 | microbench (test) + 16B CacheLine + AXI4 Burst (**99.67% hit**) | 30,786,095 | 550,105 | 0.018 | 55.96 |
+
+### 详细性能计数器 (16B Cache Line + AXI4 Burst 版本)
 
 #### EXU 统计
-| 项目 | 数值 | 百分比 |
-|------|------|--------|
-| Total Cycles | 522,842,522 | 100% |
-| Retired Instrs | 549,988 | - |
-| IDLE Cycles | 505,193,532 | 96% |
-| EXEC Cycles | 1,649,966 | 0.3% |
-| WAIT_LSU Cycles | 15,999,024 | 3% |
+|| 项目 | 数值 | 百分比 |
+||------|------|--------|
+|| Total Cycles | 30,786,095 | 100% |
+|| Retired Instrs | 550,105 | - |
+|| IDLE Cycles | 9,164,090 | 29% |
+|| EXEC Cycles | 1,650,317 | 5% |
+|| WAIT_LSU Cycles | 19,971,688 | 64% |
 
 #### 指令类型分布
-| 指令类型 | 数量 | 百分比 |
-|----------|------|--------|
-| ALU R-type | 84,615 | 15% |
-| ALU I-type | 196,495 | 35% |
-| Load | 71,759 | 13% |
-| Store | 56,869 | 10% |
-| Branch | 107,921 (taken: 66,072) | 19% |
-| JAL | 9,987 | 1% |
-| JALR | 12,728 | 2% |
-| LUI | 5,548 | 1% |
-| AUIPC | 4,064 | 0% |
-| CSR | 2 | 0% |
+|| 指令类型 | 数量 | 百分比 |
+||----------|------|--------|
+|| ALU R-type | 84,615 | 15% |
+|| ALU I-type | 196,534 | 35% |
+|| Load | 71,798 | 13% |
+|| Store | 56,869 | 10% |
+|| Branch | 107,960 (taken: 66,111) | 19% |
+|| JAL | 9,987 | 1% |
+|| JALR | 12,728 | 2% |
+|| LUI | 5,548 | 1% |
+|| AUIPC | 4,064 | 0% |
+|| CSR | 2 | 0% |
 
-#### IFU 统计
-| 项目 | 数值 |
-|------|------|
-| Fetch Count | 549,989 |
-| Request Cycles | 549,989 |
-| Wait Cycles | 501,893,600 |
-| Arb Stall Cycles | 8,003,478 |
-| Avg Fetch Latency | 912.55 cycles |
+#### I-Cache 统计
+|| 项目 | 数值 |
+||------|------|
+|| Hit Count | 548,320 |
+|| Miss Count | 1,786 |
+|| Total Accesses | 550,106 |
+|| **Hit Rate** | **99.67%** |
+|| Total Cycles | 6,413,562 |
+|| Refill Cycles | 5,313,350 |
+|| Avg Refill Latency | 2,975 cycles |
+|| AMAT | 11.65 cycles |
+
+#### IFU/Memory 统计
+|| 项目 | 数值 |
+||------|------|
+|| Mem Fetch Count | 1,786 |
+|| Request Cycles | 1,786 |
+|| Wait Cycles | 5,307,992 |
+|| Arb Stall Cycles | 0 |
+|| Avg Mem Latency | 2,972 cycles |
 
 #### LSU 统计
-| 项目 | 数值 |
-|------|------|
-| Load Count | 71,759 |
-| Store Count | 56,869 |
-| Load Total Cycles | 15,855,506 |
-| Store Total Cycles | 8,181,346 |
-| Avg Load Latency | 220.95 cycles |
-| Avg Store Latency | 143.86 cycles |
+|| 项目 | 数值 |
+||------|------|
+|| Load Count | 71,798 |
+|| Store Count | 56,869 |
+|| Load Total Cycles | 13,031,137 |
+|| Store Total Cycles | 6,683,217 |
+|| Avg Load Latency | 181.49 cycles |
+|| Avg Store Latency | 117.51 cycles |
 
 ## 优化历史
 
-| 日期 | Commit | 特性 | 周期数变化 | IPC变化 | 备注 |
-|------|--------|------|------------|---------|------|
-| 2026-01-25 | fe89758 | 基线版本 | - | - | 单周期NPC, microbench test CPI≈951 |
-| 2026-01-25 | WIP | I-Cache 修复并启用 | 522M → 30M (**17.18x**) | 0.001 → 0.018 | CPI 从 951 降至 55 |
+|| 日期 | Commit | 特性 | 周期数变化 | IPC变化 | 备注 |
+||------|--------|------|------------|---------|------|
+|| 2026-01-25 | fe89758 | 基线版本 | - | - | 单周期NPC, microbench test CPI≈951 |
+|| 2026-01-25 | WIP | I-Cache 修复并启用 | 522M → 30M (**17.18x**) | 0.001 → 0.018 | CPI 从 951 降至 55 |
+|| 2026-01-27 | 5974dd3 | 16B CacheLine + AXI4 Burst | 30.4M → 30.8M | - | Hit Rate 98.78% → 99.67%, Miss 6690 → 1786 (**3.74x fewer**) |
 
-## I-Cache 优化效果 (2026-01-25 已修复)
+## I-Cache 优化效果对比
 
-### 性能对比
-| 指标 | 基线（无 ICache） | 启用 ICache | 提升倍数 |
-|------|-------------------|-------------|----------|
-| 总周期数 | 522,842,522 | 30,438,401 | **17.18x** |
-| CPI | 950.64 | 55.33 | **17.18x** |
-| IPC | 0.0011 | 0.018 | **17.18x** |
+### 4B vs 16B Cache Line 对比
 
-### I-Cache 统计 (microbench test)
-| 项目 | 数值 |
-|------|------|
-| Hit Count | 543,395 |
-| Miss Count | 6,690 |
-| **Hit Rate** | **98.78%** |
-| Refill Cycles | 4,990,740 |
-| Avg Refill Latency | 746 cycles |
+|| 指标 | 4B Cache Line | 16B Cache Line | 变化 |
+||------|---------------|----------------|------|
+|| Cache Line 大小 | 4 Bytes | 16 Bytes | 4x |
+|| Hit Count | 543,395 | 548,320 | +4,925 |
+|| Miss Count | 6,690 | 1,786 | **-73.3%** |
+|| Hit Rate | 98.78% | **99.67%** | +0.89% |
+|| Avg Refill Latency | 746 cycles | 2,975 cycles | 4x (突发传输) |
+|| AMAT | - | 11.65 cycles | - |
+|| 总周期数 | 30,438,401 | 30,786,095 | +1.1% |
 
-### EXU 状态分布变化
-| 状态 | 基线 | 启用 ICache | 说明 |
-|------|------|-------------|------|
-| IDLE | 96% (505M) | 29% (8.8M) | 大幅减少等待取指时间 |
-| EXEC | 0.3% (1.6M) | 5% (1.6M) | 执行周期相同 |
-| WAIT_LSU | 3% (16M) | 65% (20M) | 占比提高（因总周期减少） |
+### 分析
 
-### 详细性能计数器 (ICache 启用后)
-
-#### EXU 统计
-| 项目 | 数值 | 百分比 |
-|------|------|--------|
-| Total Cycles | 30,438,401 | 100% |
-| Retired Instrs | 550,084 | - |
-| IDLE Cycles | 8,841,333 | 29% |
-| EXEC Cycles | 1,650,254 | 5% |
-| WAIT_LSU Cycles | 19,946,814 | 65% |
-
-#### IFU/Memory 统计
-| 项目 | 数值 |
-|------|------|
-| Mem Fetch Count | 6,690 |
-| Request Cycles | 6,690 |
-| Wait Cycles | 4,970,670 |
-| Arb Stall Cycles | 0 |
-| Avg Mem Latency | 743 cycles |
-
-#### LSU 统计
-| 项目 | 数值 |
-|------|------|
-| Load Count | 71,791 |
-| Store Count | 56,869 |
-| Load Total Cycles | 13,031,081 |
-| Store Total Cycles | 6,658,413 |
-| Avg Load Latency | 181.51 cycles |
-| Avg Store Latency | 117.08 cycles |
+1. **Miss 次数大幅减少**: 从 6,690 降至 1,786 (**73.3% 减少**)，因为更大的 cache line 带来更好的空间局部性
+2. **Hit Rate 提升**: 从 98.78% 提升至 99.67%
+3. **单次 Refill 延迟增加**: 从 746 cycles 增加到 2,975 cycles (约 4x)，因为需要传输 4 个字而不是 1 个
+4. **总周期略有增加**: 从 30.4M 增加到 30.8M (+1.1%)，因为突发传输本身的开销
+5. **突发传输收益有限**: 当前 SDRAM 访问延迟较高，突发传输节省的开销比例较小
 
 ## I-Cache 设计参数
 
-| 参数 | 数值 | 说明 |
-|------|------|------|
-| 总大小 | 4 KB | 中等大小，平衡面积与命中率 |
-| 关联度 | 2-way | 降低冲突 miss |
-| 块大小 | 4 Bytes | 1 word，简化 refill 逻辑 |
-| 组数 | 512 sets | 4KB / 2-way / 4B = 512 |
-| 地址划分 | Tag[31:11] Index[10:2] | 21-bit tag, 9-bit index |
-| 替换策略 | LRU | 2-way 只需 1 bit per set |
+### 当前配置 (16B Cache Line)
+
+|| 参数 | 数值 | 说明 |
+||------|------|------|
+|| 总大小 | 4 KB | 中等大小，平衡面积与命中率 |
+|| 关联度 | 2-way | 降低冲突 miss |
+|| 块大小 | 16 Bytes | 4 words，启用 AXI4 burst |
+|| 组数 | 128 sets | 4KB / 2-way / 16B = 128 |
+|| 地址划分 | Tag[31:9] Index[8:4] Offset[3:0] | 23-bit tag, 5-bit index, 4-bit offset |
+|| 替换策略 | LRU | 2-way 只需 1 bit per set |
+|| AXI4 Burst | INCR, len=3 | 4-beat burst (16 bytes) |
 
 ### 实现文件
-- `npc/vsrc/core/ICache.v` - I-Cache 模块
+- `npc/vsrc/core/ICache.v` - 参数化 I-Cache 模块
+- `npc/vsrc/core/IFU_AXI4.v` - AXI4 Master (支持 burst)
+- `npc/vsrc/core/AXI4_Arbiter.v` - AXI4 仲裁器
+- `npc/vsrc/core/LSU_AXI4.v` - LSU AXI4 Master
 - `npc/vsrc/ysyx_00000000.v` - 使用 `ifdef ENABLE_ICACHE` 控制启用
 
 ### 启用方法

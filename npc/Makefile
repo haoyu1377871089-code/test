@@ -1,7 +1,7 @@
 TOPNAME = top
 # 头文件名称
 NXDC_FILES = constr/top.nxdc
-INC_PATH ?= $(abspath ./vsrc/core) $(abspath ./vsrc/perip)
+INC_PATH ?= $(abspath ./vsrc/npc_soc)
 IMG ?=
 # 定义一个可选的头文件搜索变量
 GTKWAVE      ?= gtkwave         
@@ -33,8 +33,8 @@ SRC_AUTO_BIND = $(abspath $(BUILD_DIR)/auto_bind.cpp)
 $(SRC_AUTO_BIND): $(NXDC_FILES)
 	python3 $(NVBOARD_HOME)/scripts/auto_pin_bind.py $^ $@
 
-# project source
-VSRCS = $(shell find $(abspath ./vsrc) -name "*.v")
+# project source (npc_soc configuration)
+VSRCS = $(shell find $(abspath ./vsrc/npc_soc) -name "*.v")
 CSRCS = $(shell find $(abspath ./csrc) -name "*.c" -or -name "*.cc" -or -name "*.cpp")
 # 排除 main_soc.cpp（用于 ysyxSoC 配置）
 CSRCS := $(filter-out $(abspath ./csrc/main_soc.cpp), $(CSRCS))
@@ -58,7 +58,7 @@ LDFLAGS += -ldl -lrt -lpthread $(SDL2_LDFLAGS)
 $(BIN): $(VSRCS) $(CSRCS) $(NVBOARD_ARCHIVE)
 	@rm -rf $(OBJ_DIR)
 	$(VERILATOR) $(VERILATOR_CFLAGS) \
-        -I$(abspath ./vsrc) \
+        -I$(abspath ./vsrc/npc_soc) \
         --top-module $(TOPNAME) $^ \
         $(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
         --Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))

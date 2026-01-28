@@ -1,0 +1,55 @@
+---
+description: NPC Verilog 源代码目录结构说明
+globs: npc/vsrc/**/*.v, npc/Makefile*, npc/vsrc/README.md
+alwaysApply: false
+---
+
+# NPC Verilog 源代码结构
+
+## 默认配置
+
+**默认使用 `ysyxsoc/` 配置**，即连接到 ysyxSoC 系统。
+
+## 目录结构
+
+```
+npc/vsrc/
+├── ysyxsoc/           # 默认配置 - ysyxSoC 集成
+│   ├── ysyx_00000000.v     # NPC 顶层模块
+│   ├── EXU.v               # 执行单元
+│   ├── RegisterFile.v      # 寄存器文件
+│   ├── ICache.v            # I-Cache (4KB, 2-way, 16B line)
+│   ├── IFU_AXI4.v          # AXI4 Burst Master (取指)
+│   ├── LSU_AXI4.v          # AXI4 Single-Beat Master (访存)
+│   └── AXI4_Arbiter.v      # AXI4 仲裁器
+│
+├── npc_soc/           # 备用配置 - 独立仿真
+│   └── ...                 # AXI4-Lite 接口，内置外设
+│
+└── README.md
+```
+
+## 编译命令
+
+```bash
+# 默认：ysyxSoC 配置
+cd npc && make -f Makefile.soc
+
+# 备用：独立仿真配置
+cd npc && make
+```
+
+## 修改 Verilog 代码时
+
+1. **优先修改 `ysyxsoc/` 目录**下的文件
+2. 共享模块 (`EXU.v`, `RegisterFile.v`) 在两个目录各有一份，如需同步修改需手动复制
+3. 修改后运行 `make -f Makefile.soc` 测试
+
+## 关键设计参数 (ysyxsoc 配置)
+
+| 参数 | 值 |
+|------|-----|
+| I-Cache | 4KB, 2-way, 16B line |
+| AXI4 Burst | 4-beat INCR |
+| 仲裁策略 | IFU 优先 |
+| Hit Rate | 99.67% (microbench) |
