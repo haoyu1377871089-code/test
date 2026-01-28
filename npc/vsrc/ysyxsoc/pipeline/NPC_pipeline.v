@@ -371,10 +371,14 @@ module NPC_pipeline (
             id_ex_is_system <= 1'b0;
             id_ex_is_fence <= 1'b0;
             id_ex_is_csr <= 1'b0;
-        end else if (flush_id) begin
-            id_ex_valid <= 1'b0;
         end else if (!stall_id) begin  // 使用 stall_id 而不是 stall_ex，因为 stall_id 包含 RAW hazard
-            if (idu_out_valid) begin
+            // 指令从 EX 阶段移出时清零 id_ex_valid
+            if (exu_out_valid && !flush_ex) begin
+                id_ex_valid <= 1'b0;
+            end
+            
+            // 新指令进入 EX 阶段
+            if (idu_out_valid && !flush_id) begin
                 id_ex_valid <= 1'b1;
                 id_ex_pc <= idu_out_pc;
                 id_ex_inst <= idu_out_inst;
@@ -398,8 +402,6 @@ module NPC_pipeline (
                 id_ex_is_system <= idu_out_is_system;
                 id_ex_is_fence <= idu_out_is_fence;
                 id_ex_is_csr <= idu_out_is_csr;
-            end else begin
-                id_ex_valid <= 1'b0;
             end
         end
     end
@@ -464,6 +466,9 @@ module NPC_pipeline (
     wire lsu_in_valid = ex_mem_valid;
     
     // MEM/WB 级间寄存器更新
+    // 使用握手协议：lsu_out_valid && wbu_in_ready 表示数据被消费
+    wire mem_wb_handshake = mem_wb_valid && wbu_in_ready;
+    
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             mem_wb_valid <= 1'b0;
@@ -480,7 +485,14 @@ module NPC_pipeline (
             mem_wb_ecall <= 1'b0;
             mem_wb_mret <= 1'b0;
         end else begin
-            if (lsu_out_valid) begin
+            // 先处理数据被消费的情况
+            if (mem_wb_handshake) begin
+                mem_wb_valid <= 1'b0;
+            end
+            
+            // 然后处理新数据
+            if (lsu_out_valid && (!mem_wb_valid || mem_wb_handshake)) begin
+                // 只有在当前没有有效数据，或者数据刚被消费时，才更新
                 mem_wb_valid <= 1'b1;
                 mem_wb_pc <= lsu_out_pc;
                 mem_wb_inst <= lsu_out_inst;
@@ -494,8 +506,6 @@ module NPC_pipeline (
                 mem_wb_ebreak <= lsu_out_ebreak;
                 mem_wb_ecall <= lsu_out_ecall;
                 mem_wb_mret <= lsu_out_mret;
-            end else begin
-                mem_wb_valid <= 1'b0;
             end
         end
     end
@@ -504,6 +514,7 @@ module NPC_pipeline (
     
     // WBU 输入控制
     wire wbu_in_valid = mem_wb_valid;
+    wire wbu_in_ready;
     
     // ========== 模块实例化 ==========
     
@@ -655,7 +666,7 @@ module NPC_pipeline (
         .clk         (clk),
         .rst         (rst),
         .in_valid    (wbu_in_valid),
-        .in_ready    (),
+        .in_ready    (wbu_in_ready),
         .in_pc       (mem_wb_pc),
         .in_inst     (mem_wb_inst),
         .in_result   (mem_wb_result),
