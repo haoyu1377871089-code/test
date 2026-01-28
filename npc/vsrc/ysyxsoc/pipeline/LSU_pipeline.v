@@ -103,15 +103,17 @@ module LSU_pipeline (
     end
     
     // ========== Load 数据提取 ==========
+    // 注意：使用锁存的 mem_result 而不是 mem_rdata，
+    // 因为在 S_DONE 状态时 mem_rdata 可能已经变化
     reg [31:0] load_result;
     always @(*) begin
         case (funct3_reg)
-            3'b000: load_result = {{24{mem_rdata[7]}}, mem_rdata[7:0]};   // LB
-            3'b001: load_result = {{16{mem_rdata[15]}}, mem_rdata[15:0]}; // LH
-            3'b010: load_result = mem_rdata;                              // LW
-            3'b100: load_result = {24'b0, mem_rdata[7:0]};                // LBU
-            3'b101: load_result = {16'b0, mem_rdata[15:0]};               // LHU
-            default: load_result = mem_rdata;
+            3'b000: load_result = {{24{mem_result[7]}}, mem_result[7:0]};   // LB
+            3'b001: load_result = {{16{mem_result[15]}}, mem_result[15:0]}; // LH
+            3'b010: load_result = mem_result;                              // LW
+            3'b100: load_result = {24'b0, mem_result[7:0]};                // LBU
+            3'b101: load_result = {16'b0, mem_result[15:0]};               // LHU
+            default: load_result = mem_result;
         endcase
     end
     
