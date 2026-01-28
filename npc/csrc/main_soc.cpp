@@ -3,8 +3,11 @@
 #include "verilated_vcd_c.h"
 #include <iostream>
 #include <cstring>
-#include <nvboard.h>
 #include <signal.h>
+
+#ifndef NO_NVBOARD
+#include <nvboard.h>
+#endif
 
 extern "C" void flash_init_test_data();
 extern "C" void flash_load_program(const char* filename, uint32_t flash_offset);
@@ -16,6 +19,11 @@ extern int16_t uart_divisor_cnt;
 
 // NVBoard auto-generated function declaration
 void nvboard_bind_all_pins(VysyxSoCFull* top);
+#ifdef NO_NVBOARD
+void nvboard_init();
+void nvboard_quit();
+void nvboard_update();
+#endif
 
 static volatile bool sig_exit = false;
 void sigint_handler(int) { sig_exit = true; }
