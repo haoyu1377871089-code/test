@@ -1,0 +1,221 @@
+# Makefile.soc - ysyxSoC Configuration Build
+# 用于构建 NPC 处理器与 ysyxSoC 集成的仿真
+
+TOPNAME = ysyxSoCFull
+INC_PATH ?= $(abspath ./vsrc/ysyxsoc)
+
+# 环境变量
+NVBOARD_HOME ?= $(abspath ../nvboard)
+AM_HOME ?= $(abspath ../abstract-machine)
+YSYXSOC_HOME ?= $(abspath ../ysyxSoC)
+
+VERILATOR = verilator
+VERILATOR_CFLAGS += -MMD --build -cc --trace \
+                -O3 --x-assign fast --x-initial fast --noassert --no-timing \
+                -Wno-fatal -Wno-TIMESCALEMOD -Wno-PINMISSING \
+                +define+SIMULATION +define+ENABLE_ICACHE
+
+# 流水线版本的额外定义
+VERILATOR_CFLAGS_PIPELINE = $(VERILATOR_CFLAGS) +define+ENABLE_PIPELINE
+
+BUILD_DIR = ./build_soc
+OBJ_DIR = $(BUILD_DIR)/obj_dir
+BIN = $(BUILD_DIR)/$(TOPNAME)
+
+# 默认目标
+default: soc
+
+all: soc pipeline
+
+$(shell mkdir -p $(BUILD_DIR))
+
+# NVBoard 编译（可选，仅当 USE_NVBOARD=1 时使用）
+USE_NVBOARD ?= 0
+ifeq ($(USE_NVBOARD),1)
+include $(NVBOARD_HOME)/scripts/nvboard.mk
+NXDC_FILES = constr/top.nxdc
+SRC_AUTO_BIND = $(abspath $(BUILD_DIR)/auto_bind.cpp)
+$(SRC_AUTO_BIND): $(NXDC_FILES)
+	python3 $(NVBOARD_HOME)/scripts/auto_pin_bind.py $^ $@
+NVBOARD_DEP = $(SRC_AUTO_BIND) $(NVBOARD_ARCHIVE)
+NVBOARD_CFLAGS = -I$(NVBOARD_HOME)/include -I$(NVBOARD_HOME)/usr/include
+NVBOARD_LDFLAGS = $(shell sdl2-config --libs) -lSDL2_image -lSDL2_ttf
+else
+NVBOARD_DEP =
+NVBOARD_ARCHIVE =
+NVBOARD_CFLAGS = -DNO_NVBOARD
+NVBOARD_LDFLAGS =
+endif
+
+# ysyxSoC Verilog 文件
+YSYXSOC_V = $(YSYXSOC_HOME)/build/ysyxSoCFull.v
+
+# 生成 ysyxSoC Verilog
+$(YSYXSOC_V): $(shell find $(YSYXSOC_HOME)/src -name "*.scala" 2>/dev/null)
+	@echo "=== Generating ysyxSoC Verilog (this may take a while) ==="
+	cd $(YSYXSOC_HOME) && \
+	mkdir -p build && \
+	DISPLAY="" CHISEL_FIRTOOL_PATH=$(YSYXSOC_HOME)/patch/firtool/firtool-1.105.0/bin \
+	./mill -i ysyxsoc.runMain ysyx.Elaborate --target-dir build && \
+	mv build/ysyxSoCTop.sv build/ysyxSoCFull.v && \
+	sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' build/ysyxSoCFull.v && \
+	sed -i '/firrtl_black_box_resource_files.f/, $$d' build/ysyxSoCFull.v
+	@echo "=== ysyxSoC Verilog generated ==="
+
+# 如果已有 ysyxSoCTop.sv，可直接使用（不重新生成）
+$(YSYXSOC_HOME)/build/ysyxSoCFull.v.fast: $(YSYXSOC_HOME)/ysyxSoCTop.sv
+	@mkdir -p $(YSYXSOC_HOME)/build
+	@if [ ! -f $(YSYXSOC_V) ]; then \
+		echo "=== Converting ysyxSoCTop.sv to ysyxSoCFull.v ==="; \
+		cp $(YSYXSOC_HOME)/ysyxSoCTop.sv $(YSYXSOC_V); \
+		sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $(YSYXSOC_V); \
+		sed -i '/firrtl_black_box_resource_files.f/, $$d' $(YSYXSOC_V); \
+	fi
+
+verilog-fast: $(YSYXSOC_HOME)/build/ysyxSoCFull.v.fast
+
+# NPC Verilog 源文件 (单周期版本)
+VSRCS_NPC = $(shell find $(abspath ./vsrc/ysyxsoc) -maxdepth 1 -name "*.v")
+# NPC Verilog 源文件 (流水线版本)
+VSRCS_PIPELINE = $(shell find $(abspath ./vsrc/ysyxsoc/pipeline) -name "*.v")
+
+# 外设 Verilog 文件
+VSRCS_PERIP = $(YSYXSOC_HOME)/perip/uart16550/rtl/raminfr.v \
+              $(YSYXSOC_HOME)/perip/uart16550/rtl/uart_top_apb.v \
+              $(YSYXSOC_HOME)/perip/uart16550/rtl/uart_receiver.v \
+              $(YSYXSOC_HOME)/perip/uart16550/rtl/uart_transmitter.v \
+              $(YSYXSOC_HOME)/perip/uart16550/rtl/uart_regs.v \
+              $(YSYXSOC_HOME)/perip/uart16550/rtl/uart_rfifo.v \
+              $(YSYXSOC_HOME)/perip/uart16550/rtl/uart_tfifo.v \
+              $(YSYXSOC_HOME)/perip/uart16550/rtl/uart_sync_flops.v \
+              $(YSYXSOC_HOME)/perip/spi/rtl/spi_clgen.v \
+              $(YSYXSOC_HOME)/perip/spi/rtl/spi_shift.v \
+              $(YSYXSOC_HOME)/perip/spi/rtl/spi_top.v \
+              $(YSYXSOC_HOME)/perip/spi/rtl/spi_top_apb.v \
+              $(YSYXSOC_HOME)/perip/sdram/sdram.v \
+              $(YSYXSOC_HOME)/perip/sdram/sdram_top_axi.v \
+              $(YSYXSOC_HOME)/perip/sdram/core_sdram_axi4/sdram_axi.v \
+              $(YSYXSOC_HOME)/perip/sdram/core_sdram_axi4/sdram_axi_core.v \
+              $(YSYXSOC_HOME)/perip/psram/psram.v \
+              $(YSYXSOC_HOME)/perip/psram/psram_top_apb.v \
+              $(YSYXSOC_HOME)/perip/psram/efabless/EF_PSRAM_CTRL.v \
+              $(YSYXSOC_HOME)/perip/psram/efabless/EF_PSRAM_CTRL_wb.v \
+              $(YSYXSOC_HOME)/perip/flash/flash.v \
+              $(YSYXSOC_HOME)/perip/gpio/gpio_top_apb.v \
+              $(YSYXSOC_HOME)/perip/vga/vga_top_apb.v \
+              $(YSYXSOC_HOME)/perip/ps2/ps2_top_apb.v \
+              $(YSYXSOC_HOME)/perip/bitrev/bitrev.v \
+              $(YSYXSOC_HOME)/perip/amba/axi4_delayer.v \
+              $(YSYXSOC_HOME)/perip/amba/apb_delayer.v
+
+# C++ 源文件
+CSRCS = $(shell find $(abspath ./csrc) -name "*.c" -or -name "*.cc" -or -name "*.cpp")
+# 使用 main_soc.cpp，排除 npc_soc 专用文件
+CSRCS := $(filter-out $(abspath ./csrc/main.cpp) $(abspath ./csrc/loop.cpp) $(abspath ./csrc/program.cpp), $(CSRCS))
+
+# 编译选项
+INCFLAGS = $(addprefix -I, $(INC_PATH))
+SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null)
+SDL2_LDFLAGS := $(shell pkg-config --libs sdl2 2>/dev/null)
+ifeq ($(strip $(SDL2_CFLAGS)),)
+SDL2_CFLAGS := -I/usr/include/SDL2
+SDL2_LDFLAGS := -lSDL2
+endif
+
+CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(TOPNAME)\"" -std=c++11 \
+            -I$(AM_HOME)/am/include $(NVBOARD_CFLAGS) $(SDL2_CFLAGS)
+LDFLAGS += -ldl -lrt -lpthread $(SDL2_LDFLAGS) $(NVBOARD_LDFLAGS)
+
+# 单周期版本构建（使用 ysyx_00000000.v）
+soc: verilog-fast $(NVBOARD_DEP)
+	@rm -rf $(OBJ_DIR)
+	@echo "=== Building single-cycle NPC with ysyxSoC ==="
+	$(VERILATOR) $(VERILATOR_CFLAGS) \
+		-I$(abspath ./vsrc/ysyxsoc) \
+		-I$(YSYXSOC_HOME)/perip/uart16550/rtl \
+		-I$(YSYXSOC_HOME)/perip/spi/rtl \
+		-I$(YSYXSOC_HOME)/perip/sdram \
+		--top-module $(TOPNAME) \
+		$(YSYXSOC_V) $(VSRCS_NPC) $(VSRCS_PERIP) $(CSRCS) $(NVBOARD_ARCHIVE) \
+		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
+		--Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
+	@echo "=== Build complete: $(BIN) ==="
+
+# 流水线版本构建
+pipeline: verilog-fast $(NVBOARD_DEP)
+	@rm -rf $(OBJ_DIR)
+	@echo "=== Building pipeline NPC with ysyxSoC ==="
+	$(VERILATOR) $(VERILATOR_CFLAGS_PIPELINE) \
+		-I$(abspath ./vsrc/ysyxsoc) \
+		-I$(abspath ./vsrc/ysyxsoc/pipeline) \
+		-I$(YSYXSOC_HOME)/perip/uart16550/rtl \
+		-I$(YSYXSOC_HOME)/perip/spi/rtl \
+		-I$(YSYXSOC_HOME)/perip/sdram \
+		--top-module $(TOPNAME) \
+		$(YSYXSOC_V) $(VSRCS_PIPELINE) $(VSRCS_NPC) $(VSRCS_PERIP) $(CSRCS) $(NVBOARD_ARCHIVE) \
+		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
+		--Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
+	@echo "=== Build complete: $(BIN) ==="
+
+# 运行测试（需要指定 IMG 参数）
+run: $(BIN)
+	@if [ -z "$(IMG)" ]; then \
+		echo "Usage: make -f Makefile.soc run IMG=<binary>"; \
+		echo "Example: make -f Makefile.soc run IMG=/path/to/dummy-riscv32e-ysyxsoc.bin"; \
+		exit 1; \
+	fi
+	$(BIN) --no-gui $(IMG)
+
+# 运行 dummy 测试
+run-dummy: $(BIN)
+	@DUMMY_BIN=$(AM_HOME)/../am-kernels/tests/cpu-tests/build/dummy-riscv32e-ysyxsoc.bin; \
+	if [ -f "$$DUMMY_BIN" ]; then \
+		echo "Running dummy test..."; \
+		timeout 120s $(BIN) --no-gui $$DUMMY_BIN; \
+	else \
+		echo "Error: $$DUMMY_BIN not found."; \
+		echo "Please build the test first:"; \
+		echo "  cd $(AM_HOME)/../am-kernels/tests/cpu-tests && make ARCH=riscv32e-ysyxsoc ALL=dummy"; \
+		exit 1; \
+	fi
+
+# 运行 microbench 测试
+run-microbench: $(BIN)
+	@BENCH_BIN=$(AM_HOME)/../am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin; \
+	if [ -f "$$BENCH_BIN" ]; then \
+		echo "Running microbench test..."; \
+		$(BIN) --no-gui $$BENCH_BIN; \
+	else \
+		echo "Error: $$BENCH_BIN not found."; \
+		echo "Please build the test first:"; \
+		echo "  cd $(AM_HOME)/../am-kernels/benchmarks/microbench && make ARCH=riscv32e-ysyxsoc"; \
+		exit 1; \
+	fi
+
+# 清理
+clean:
+	rm -rf $(BUILD_DIR)
+
+clean-all: clean
+	rm -rf $(YSYXSOC_HOME)/build
+
+# 帮助
+help:
+	@echo "Makefile.soc - ysyxSoC Configuration Build"
+	@echo "============================================"
+	@echo "Targets:"
+	@echo "  soc           Build single-cycle NPC with ysyxSoC (default)"
+	@echo "  pipeline      Build pipeline NPC with ysyxSoC"
+	@echo "  verilog-fast  Convert ysyxSoCTop.sv to ysyxSoCFull.v"
+	@echo "  run IMG=<bin> Run simulation with specified binary"
+	@echo "  run-dummy     Run dummy test (requires am-kernels build)"
+	@echo "  run-microbench Run microbench test (requires am-kernels build)"
+	@echo "  clean         Clean build directory"
+	@echo "  clean-all     Clean build directory and ysyxSoC build"
+	@echo ""
+	@echo "Environment variables:"
+	@echo "  NVBOARD_HOME  Path to NVBoard (default: ../nvboard)"
+	@echo "  AM_HOME       Path to abstract-machine (default: ../abstract-machine)"
+	@echo "  YSYXSOC_HOME  Path to ysyxSoC (default: ../ysyxSoC)"
+
+.PHONY: default all soc pipeline verilog-fast run run-dummy run-microbench clean clean-all help

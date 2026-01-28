@@ -3,19 +3,20 @@
 #include "verilated_vcd_c.h"
 #include <iostream>
 #include <cstring>
-#include <nvboard.h>
 #include <signal.h>
+
+#ifndef NO_NVBOARD
+#include <nvboard.h>
+// NVBoard's UART divisor counter - set to large value to disable NVBoard UART sampling
+extern int16_t uart_divisor_cnt;
+// NVBoard auto-generated function declaration
+void nvboard_bind_all_pins(VysyxSoCFull* top);
+#endif
 
 extern "C" void flash_init_test_data();
 extern "C" void flash_load_program(const char* filename, uint32_t flash_offset);
 extern "C" bool npc_request_exit();
 extern "C" void npc_set_exit_after_frames(int n);
-
-// NVBoard's UART divisor counter - set to large value to disable NVBoard UART sampling
-extern int16_t uart_divisor_cnt;
-
-// NVBoard auto-generated function declaration
-void nvboard_bind_all_pins(VysyxSoCFull* top);
 
 static volatile bool sig_exit = false;
 void sigint_handler(int) { sig_exit = true; }
@@ -110,7 +111,8 @@ int main(int argc, char **argv) {
     top->trace(tfp, 99);
     tfp->open("build_soc/trace.vcd");
 
-    // Initialize NVBoard (unless --no-gui)
+    // Initialize NVBoard (unless --no-gui or NO_NVBOARD)
+#ifndef NO_NVBOARD
     if (!no_gui) {
         nvboard_bind_all_pins(top);
         nvboard_init();
@@ -119,10 +121,14 @@ int main(int argc, char **argv) {
         // We use our own uart_tick() for stdout output
         uart_divisor_cnt = 32767;  // Set to max int16_t to effectively disable
     }
+#else
+    no_gui = true;  // Force no-gui when NO_NVBOARD is defined
+#endif
 
     top->reset = 1;
     top->clock = 0;
-    // Note: externalPins_uart_rx is controlled by NVBoard via pin_poke
+    // Set UART RX to idle state (high)
+    top->externalPins_uart_rx = 1;
 
     uint64_t time = 0;
     std::cout << "Starting simulation loop..." << std::endl;
@@ -164,9 +170,11 @@ int main(int argc, char **argv) {
               << ", request_exit=" << npc_request_exit() 
               << ", uart_chars=" << uart_char_count << std::endl;
 
+#ifndef NO_NVBOARD
     if (!no_gui) {
         nvboard_quit();
     }
+#endif
     tfp->close();
     delete top;
     return 0;
