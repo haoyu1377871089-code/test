@@ -50,7 +50,7 @@ LDFLAGS += -ldl -lrt -lpthread
 
 $(shell mkdir -p $(BUILD_DIR))
 
-$(YSYXSOC_GEN_V): $(YSYXSOC_V)
+$(YSYXSOC_GEN_V): $(YSYXSOC_V) Makefile.soc
 	@python3 -c "import pathlib,itertools,re; src=pathlib.Path(\"$<\"); dst=pathlib.Path(\"$@\"); marker=\"firrtl_black_box_resource_files.f\"; lines=src.read_text().splitlines(); out=list(itertools.takewhile(lambda l: marker not in l, lines)); out=[re.sub(r'_(aw|ar|w|r|b)_(?:bits_)?', r'_\\1', l) for l in out]; dst.write_text(\"\\n\".join(out) + \"\\n\")"
 
 soc: VERILATOR_DEFINES = $(SOC_DEFINES) $(EXTRA_DEFINES)
