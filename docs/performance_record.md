@@ -178,6 +178,58 @@ VERILATOR_CFLAGS += ... +define+SIMULATION +define+ENABLE_ICACHE
 - **问题**: 写操作完成时设置的 `rvalid_out=1` 被 else 分支的 `rvalid_out=0` 覆盖
 - **修复**: 移除冲突的 else 分支
 
+## D-Cache 测试结果 (2026-01-28)
+
+### 测试环境
+- 测试程序: microbench 初始化阶段 (~29K 指令)
+- D-Cache 配置: 4KB, 2-way, 16B line, Write-through + No-write-allocate
+
+### 性能对比
+
+|| 指标 | 基线 (仅 I-Cache) | 启用 D-Cache | 变化 |
+||------|------------------|--------------|------|
+|| Total Cycles | 1,862,239 | 1,901,475 | +2.1% |
+|| Retired Instrs | 29,506 | 29,482 | -0.08% |
+|| CPI | 63.11 | 64.49 | +2.2% |
+|| WAIT_LSU Cycles | 793,672 (42%) | 833,148 (43%) | +5.0% |
+
+### D-Cache 详细统计 (启用后)
+
+|| 项目 | 数值 |
+||------|------|
+|| Read Hit Count | 108 |
+|| Read Miss Count | 8 |
+|| Write Hit Count | 0 |
+|| Write Miss Count | 1,597 |
+|| Read Hit Rate | 93.10% |
+|| Write Hit Rate | 0% |
+|| Total Cycles | 818,285 |
+|| AMAT | 55.05 cycles |
+
+### LSU 延迟对比
+
+|| 指标 | 基线 | 启用 D-Cache | 变化 |
+||------|------|--------------|------|
+|| Avg Load Latency | 49.79 cycles | 48.22 cycles | -3.2% |
+|| Avg Store Latency | 53.76 cycles | 53.76 cycles | 0% |
+|| LSU Load Count | 8,971 | 8,855 | -116 (D-Cache 命中) |
+
+### 分析结论
+
+1. **Write-through 策略开销**：所有 Store 都是 Cache Miss（Write Hit = 0），因为使用 no-write-allocate 策略
+2. **Load 命中有效**：108 次 Load 命中 D-Cache，减少了 LSU 访问（8971 → 8855）
+3. **整体 CPI 略增**：Write-through 的额外状态机开销抵消了 Load 命中的收益
+4. **适用场景**：D-Cache 更适合读密集型工作负载；对于写密集型，需考虑 write-back 策略
+
+### D-Cache 启用方法
+
+```bash
+# 在 Makefile.soc 中添加 DCACHE=1 启用
+make -f Makefile.soc DCACHE=1 soc
+```
+
+---
+
 ## 注意事项
 
 1. **APB Delayer 参数**: R_TIMES_S=1280 对应 CPU频率≈500MHz, 设备频率≈100MHz
@@ -186,3 +238,6 @@ VERILATOR_CFLAGS += ... +define+SIMULATION +define+ENABLE_ICACHE
 4. **一致性检查**: 
    - IFU Fetch ~= Retired Instrs (允许差1，因为 ebreak 时有预取) - 已修复为 PASS
    - Sum of Instr Types = Retired (应该 PASS)
+5. **D-Cache 注意**: 
+   - 可缓存区域：PSRAM (0x80000000-0x803FFFFF)、SDRAM (0xa0000000-0xa1FFFFFF)
+   - 当前 write-through 策略对写密集型工作负载有额外开销
