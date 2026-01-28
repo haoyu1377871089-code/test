@@ -181,7 +181,16 @@ module LSU_pipeline (
         end else begin
             case (state)
                 S_IDLE: begin
-                    if (in_valid && in_ready) begin
+                    // 如果 out_valid 且 out_ready，说明数据已被消费，清零 out_valid
+                    if (out_valid && out_ready) begin
+                        out_valid <= 1'b0;
+                    end
+                    // 如果 out_valid 但没有新输入，保持状态等待消费
+                    else if (out_valid && !in_valid) begin
+                        // 保持 out_valid，等待下游消费
+                    end
+                    // 接收新输入
+                    else if (in_valid && in_ready) begin
                         // 锁存输入
                         pc_reg <= in_pc;
                         inst_reg <= in_inst;
@@ -216,8 +225,6 @@ module LSU_pipeline (
                                 result_reg <= in_alu_result;
                             out_valid <= 1'b1;
                         end
-                    end else if (out_ready) begin
-                        out_valid <= 1'b0;
                     end
                 end
                 
@@ -244,7 +251,7 @@ module LSU_pipeline (
                             result_reg <= alu_result_reg;
                         end
                         out_valid <= 1'b1;
-                    end else if (out_ready) begin
+                    end else if (out_valid && out_ready) begin
                         // 数据被下游消费，返回 IDLE
                         state <= S_IDLE;
                         out_valid <= 1'b0;

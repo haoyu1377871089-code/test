@@ -197,6 +197,7 @@ module NPC_pipeline (
     reg        mem_wb_mret;
     
     // ========== WB 阶段信号 ==========
+    wire        wbu_in_ready;
     wire        wbu_rf_wen;
     wire [4:0]  wbu_rf_waddr;
     wire [31:0] wbu_rf_wdata;
@@ -257,12 +258,14 @@ module NPC_pipeline (
     assign stall_mem = 1'b0;  // MEM 阶段不暂停
     
     // 控制冒险冲刷: 分支/跳转/异常时冲刷流水线
+    // 注意：flush_ex 只冲刷 EX 阶段，不影响 MEM 阶段的指令
+    // flush 信号在 EX 阶段产生，只影响 IF/ID/EX 阶段
     wire branch_flush = exu_branch_taken || exu_is_jump;
     wire exception_flush = wbu_exception_valid;
     
     assign flush_if  = branch_flush || exception_flush;
     assign flush_id  = branch_flush || exception_flush;
-    assign flush_ex  = exception_flush;
+    assign flush_ex  = branch_flush || exception_flush;  // EX 阶段也需要冲刷
     
     // ========== IF 阶段逻辑 ==========
     
@@ -464,6 +467,7 @@ module NPC_pipeline (
     wire lsu_in_valid = ex_mem_valid;
     
     // MEM/WB 级间寄存器更新
+    // 注意：只有当 LSU 输出新数据时才更新，WBU 消费后清零 valid
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             mem_wb_valid <= 1'b0;
@@ -480,7 +484,12 @@ module NPC_pipeline (
             mem_wb_ecall <= 1'b0;
             mem_wb_mret <= 1'b0;
         end else begin
-            if (lsu_out_valid) begin
+            // WBU 消费后清零 valid
+            if (wbu_in_valid && wbu_in_ready) begin
+                mem_wb_valid <= 1'b0;
+            end
+            // LSU 输出新数据时更新（只有当 WBU 准备好或当前 valid 为 0 时才更新）
+            else if (lsu_out_valid && (!mem_wb_valid || wbu_in_ready)) begin
                 mem_wb_valid <= 1'b1;
                 mem_wb_pc <= lsu_out_pc;
                 mem_wb_inst <= lsu_out_inst;
@@ -494,8 +503,6 @@ module NPC_pipeline (
                 mem_wb_ebreak <= lsu_out_ebreak;
                 mem_wb_ecall <= lsu_out_ecall;
                 mem_wb_mret <= lsu_out_mret;
-            end else begin
-                mem_wb_valid <= 1'b0;
             end
         end
     end
@@ -604,6 +611,8 @@ module NPC_pipeline (
     );
     
     // LSU
+    // 注意：LSU 在 MEM 阶段，不应该被 flush 影响
+    // flush 信号在 EX 阶段产生，此时 MEM 阶段的指令已经进入，不应该被冲刷
     LSU_pipeline u_lsu (
         .clk         (clk),
         .rst         (rst),
@@ -627,7 +636,7 @@ module NPC_pipeline (
         .in_ecall    (ex_mem_ecall),
         .in_mret     (ex_mem_mret),
         .out_valid   (lsu_out_valid),
-        .out_ready   (1'b1),  // WB 阶段总是准备接收
+        .out_ready   (wbu_in_ready || !mem_wb_valid),  // WB 阶段准备好时才能接收
         .out_pc      (lsu_out_pc),
         .out_inst    (lsu_out_inst),
         .out_result  (lsu_out_result),
@@ -647,7 +656,7 @@ module NPC_pipeline (
         .mem_wmask   (lsu_wmask),
         .mem_rvalid  (lsu_rvalid),
         .mem_rdata   (lsu_rdata),
-        .flush       (1'b0)
+        .flush       (1'b0)  // MEM 阶段不受 flush 影响
     );
     
     // WBU
@@ -655,7 +664,7 @@ module NPC_pipeline (
         .clk         (clk),
         .rst         (rst),
         .in_valid    (wbu_in_valid),
-        .in_ready    (),
+        .in_ready    (wbu_in_ready),
         .in_pc       (mem_wb_pc),
         .in_inst     (mem_wb_inst),
         .in_result   (mem_wb_result),
