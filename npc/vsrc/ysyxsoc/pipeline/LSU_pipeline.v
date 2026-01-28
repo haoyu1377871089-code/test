@@ -103,6 +103,8 @@ module LSU_pipeline (
     end
     
     // ========== Load 数据提取 ==========
+    // 注意: LSU_AXI4 已经根据地址偏移对数据进行了对齐（右移）
+    // 所以这里不需要再根据地址偏移提取，直接从低位提取即可
     reg [31:0] load_result;
     always @(*) begin
         case (funct3_reg)
@@ -186,13 +188,14 @@ module LSU_pipeline (
         end else begin
             case (state)
                 S_IDLE: begin
-                    // 首先处理 out_valid 的清零（在下一个周期清零）
-                    if (out_valid_sent) begin
+                    // 处理 out_valid 的清零（当下游接收后）
+                    if (out_valid && out_ready) begin
                         out_valid <= 1'b0;
                         out_valid_sent <= 1'b0;
                     end
                     
-                    if (in_valid && in_ready) begin
+                    // 只有当 out_valid=0 或下游已接收时才能接收新指令
+                    if (in_valid && in_ready && (!out_valid || out_ready)) begin
                         // 锁存输入
                         pc_reg <= in_pc;
                         inst_reg <= in_inst;
@@ -226,7 +229,7 @@ module LSU_pipeline (
                             else
                                 result_reg <= in_alu_result;
                             out_valid <= 1'b1;
-                            out_valid_sent <= 1'b1;  // 标记需要在下一周期清零
+                            out_valid_sent <= 1'b1;
                         end
                     end
                 end
@@ -246,7 +249,7 @@ module LSU_pipeline (
                 
                 S_DONE: begin
                     // 访存完成，输出结果
-                    if (!out_valid && !out_valid_sent) begin
+                    if (!out_valid) begin
                         // 第一次进入 S_DONE，设置输出
                         if (mem_ren_reg) begin
                             result_reg <= load_result;
@@ -254,13 +257,13 @@ module LSU_pipeline (
                             result_reg <= alu_result_reg;
                         end
                         out_valid <= 1'b1;
-                        out_valid_sent <= 1'b1;
-                    end else begin
-                        // 数据已发送，返回 IDLE
+                    end else if (out_valid && out_ready) begin
+                        // 数据被下游接收，返回 IDLE
                         state <= S_IDLE;
                         out_valid <= 1'b0;
                         out_valid_sent <= 1'b0;
                     end
+                    // 否则保持 out_valid，等待下游接收
                 end
                 
                 default: state <= S_IDLE;
