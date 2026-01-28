@@ -106,6 +106,55 @@
 || 2026-01-25 | fe89758 | 基线版本 | - | - | 单周期NPC, microbench test CPI≈951 |
 || 2026-01-25 | WIP | I-Cache 修复并启用 | 522M → 30M (**17.18x**) | 0.001 → 0.018 | CPI 从 951 降至 55 |
 || 2026-01-27 | 5974dd3 | 16B CacheLine + AXI4 Burst | 30.4M → 30.8M | - | Hit Rate 98.78% → 99.67%, Miss 6690 → 1786 (**3.74x fewer**) |
+|| 2026-01-28 | WIP | D-Cache 启用 | 30.6M → 24.9M (**18.7%**) | 0.018 → 0.022 | CPI 从 55.66 降至 45.23, Read Hit Rate 96.65% |
+
+## D-Cache 优化效果 (2026-01-28)
+
+### 启用前后对比
+
+|| 指标 | 无 D-Cache | 启用 D-Cache | 变化 |
+||------|------------|--------------|------|
+|| **CPI** | **55.66** | **45.23** | **-18.7%** |
+|| 总周期数 | 30,593,144 | 24,867,697 | -18.7% |
+|| WAIT_LSU 占比 | 65% | 56% | -9pp |
+|| Load 延迟 | 185.75 cycles | 170.35 cycles | -8.3% |
+|| Load 周期总计 | 13,738,352 | 7,584,138 | **-45%** |
+
+### D-Cache 统计
+
+|| 指标 | 数值 |
+||------|------|
+|| Read Hit Count | 29,471 |
+|| Read Miss Count | 1,019 |
+|| **Read Hit Rate** | **96.65%** |
+|| Write Hit Count | 8,744 |
+|| Write Miss Count | 21,014 |
+|| Total Accesses | 129,047 |
+|| Avg Refill Latency | 935 cycles |
+|| AMAT | 108.83 cycles |
+
+### 分析
+
+1. **Load 性能显著提升**: 96.65% 的 Read 在 cache 中命中，Load 总周期减少 45%
+2. **Write 性能持平**: 采用 Write-Through 策略，所有写操作仍需访问内存
+3. **WAIT_LSU 占比下降**: 从 65% 降至 56%，但仍是主要瓶颈
+4. **CPI 大幅降低**: 从 55.66 降至 45.23，性能提升 18.7%
+
+### D-Cache 设计参数
+
+|| 参数 | 数值 | 说明 |
+||------|------|------|
+|| 总大小 | 4 KB | 与 I-Cache 相同 |
+|| 关联度 | 2-way | 降低冲突 miss |
+|| 块大小 | 16 Bytes | 4 words，支持 burst refill |
+|| 写策略 | Write-Through | 所有写操作直接写入内存 |
+|| 写分配 | No-Write-Allocate | 写 miss 时不填充 cache |
+|| 可缓存区域 | PSRAM/SDRAM | 0x80000000-0x803FFFFF, 0xa0000000-0xa1FFFFFF |
+
+### 启用方法
+```bash
+make -f Makefile.soc DCACHE=1 soc
+```
 
 ## I-Cache 优化效果对比
 
