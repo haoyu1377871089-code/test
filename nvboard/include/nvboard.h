@@ -12,6 +12,10 @@
 
 #define VERSION_STR "v1.0 (2024.01.10)"
 
+// NVBoard initialization and cleanup
+void nvboard_init(int vga_clk_cycle = 1);
+void nvboard_quit();
+void nvboard_update();
 void set_redraw();
 uint64_t nvboard_get_time();
 
