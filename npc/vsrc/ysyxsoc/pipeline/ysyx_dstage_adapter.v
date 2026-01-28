@@ -92,29 +92,46 @@ module ysyx_00000000 (
     assign ifu_rdata  = icache_rdata;
 
     // IFU 请求转换 (ICache -> D-stage 接口)
-    // ICache 会发出 burst 请求，D-stage 接口只支持单拍
-    reg [1:0] icache_beat_cnt;
-    reg       icache_pending;
+    // ICache 会发出 burst 请求 (16B = 4 words)，D-stage 接口只支持单拍
+    // 需要将一个 burst 请求拆分为 4 个单拍请求
+    //
+    // 时序：
+    //   - icache_mem_req=1 触发开始，立即输出第一个请求
+    //   - 等待 respValid，收到后进入下一个 beat
+    //   - 4 个 beat 完成后结束
     
-    assign io_ifu_addr     = icache_mem_addr + {icache_beat_cnt, 2'b00};
-    assign io_ifu_reqValid = icache_mem_req && !icache_pending || (icache_pending && icache_beat_cnt != 0);
+    reg [1:0] icache_beat_cnt;
+    reg       icache_active;      // 正在进行 burst 传输
+    
+    // 地址计算
+    assign io_ifu_addr = icache_mem_addr + {icache_beat_cnt, 2'b00};
+    
+    // 请求信号：在 burst 期间持续有效
+    // 立即响应 icache_mem_req，或在 active 期间持续请求
+    assign io_ifu_reqValid = icache_mem_req || icache_active;
+    
+    // 数据返回给 I-Cache
     assign icache_mem_rdata  = io_ifu_rdata;
-    assign icache_mem_rvalid = io_ifu_respValid && icache_pending;
-    assign icache_mem_rlast  = io_ifu_respValid && icache_pending && (icache_beat_cnt == 2'd3);
+    assign icache_mem_rvalid = io_ifu_respValid && (icache_mem_req || icache_active);
+    assign icache_mem_rlast  = io_ifu_respValid && icache_active && (icache_beat_cnt == 2'd3);
     
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             icache_beat_cnt <= 2'd0;
-            icache_pending <= 1'b0;
+            icache_active <= 1'b0;
         end else begin
-            if (icache_mem_req && !icache_pending) begin
-                icache_pending <= 1'b1;
+            if (icache_mem_req && !icache_active) begin
+                // I-Cache 发出新请求，开始 burst 传输
+                icache_active <= 1'b1;
                 icache_beat_cnt <= 2'd0;
-            end else if (icache_pending && io_ifu_respValid) begin
+            end else if (icache_active && io_ifu_respValid) begin
+                // 收到一个响应
                 if (icache_beat_cnt == 2'd3) begin
-                    icache_pending <= 1'b0;
+                    // 最后一个 beat 完成
+                    icache_active <= 1'b0;
                     icache_beat_cnt <= 2'd0;
                 end else begin
+                    // 进入下一个 beat
                     icache_beat_cnt <= icache_beat_cnt + 1;
                 end
             end
