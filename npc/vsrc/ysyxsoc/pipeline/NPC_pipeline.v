@@ -249,6 +249,26 @@ module NPC_pipeline (
     
     wire raw_hazard = raw_ex_rs1 || raw_ex_rs2 || raw_mem_rs1 || raw_mem_rs2 || raw_wb_rs1 || raw_wb_rs2;
     
+`ifdef SIMULATION
+    reg [31:0] raw_dbg_cycle;
+    always @(posedge clk or posedge rst) begin
+        if (rst) raw_dbg_cycle <= 0;
+        else raw_dbg_cycle <= raw_dbg_cycle + 1;
+    end
+    
+    // Debug pipeline stages for first few instructions
+    always @(posedge clk) begin
+        if (raw_dbg_cycle >= 3115 && raw_dbg_cycle <= 3130) begin
+            $display("[PIPE@%0d] stall_id=%b raw_hazard=%b | ex_valid=%b mem_valid=%b wb_valid=%b",
+                raw_dbg_cycle, stall_id, raw_hazard, id_ex_valid, ex_mem_valid, mem_wb_valid);
+            $display("         ex_rd=%d ex_wen=%b | mem_rd=%d mem_wen=%b | wb_rd=%d wb_wen=%b",
+                ex_rd, id_ex_reg_wen, mem_rd, ex_mem_reg_wen, wb_rd, mem_wb_reg_wen);
+            $display("         raw_ex=%b raw_mem=%b raw_wb=%b",
+                raw_ex_rs1, raw_mem_rs1, raw_wb_rs1);
+        end
+    end
+`endif
+    
     // 暂停信号
     // stall_if: IF 阶段只在 MEM busy 或下游阻塞时暂停
     // 注意: if_waiting 不应该阻塞 IF 自己，它只是等待取指完成的状态
@@ -509,9 +529,18 @@ module NPC_pipeline (
             mem_wb_ecall <= 1'b0;
             mem_wb_mret <= 1'b0;
         end else begin
-            // 只有当 WBU 准备好接收时才更新 MEM/WB 寄存器
-            if (wbu_in_ready) begin
-                if (lsu_out_valid) begin
+            // MEM/WB 寄存器更新逻辑：
+            // WBU 使用两周期状态机：IDLE -> COMMIT -> IDLE
+            // - IDLE 时 in_ready=1，可以接收新数据
+            // - COMMIT 时 in_ready=0，正在处理数据
+            // 
+            // 我们需要在 WBU 接收数据时（IDLE 且 mem_wb_valid）锁存数据
+            // 然后在 WBU 完成处理后（inst_commit 信号）清零 valid
+            
+            if (lsu_out_valid) begin
+                // 有新数据从 LSU 到来
+                if (wbu_in_ready || !mem_wb_valid) begin
+                    // WBU 准备好接收，或者 MEM/WB 为空，锁存新数据
                     mem_wb_valid <= 1'b1;
                     mem_wb_pc <= lsu_out_pc;
                     mem_wb_inst <= lsu_out_inst;
@@ -525,11 +554,13 @@ module NPC_pipeline (
                     mem_wb_ebreak <= lsu_out_ebreak;
                     mem_wb_ecall <= lsu_out_ecall;
                     mem_wb_mret <= lsu_out_mret;
-                end else begin
-                    mem_wb_valid <= 1'b0;
                 end
+                // 否则保持当前状态（背压）
+            end else if (wbu_inst_commit) begin
+                // WBU 完成了一条指令的处理，清零 valid
+                mem_wb_valid <= 1'b0;
             end
-            // 如果 WBU 不准备好，保持当前状态
+            // 否则保持当前状态
         end
     end
     

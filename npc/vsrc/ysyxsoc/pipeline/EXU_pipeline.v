@@ -163,6 +163,35 @@ module EXU_pipeline (
     wire [31:0] branch_target = in_is_jalr ? alu_result :       // JALR: rs1 + imm
                                 in_is_jal  ? (in_pc + in_imm) : // JAL: pc + imm
                                              (in_pc + in_imm);  // Branch: pc + imm
+
+`ifdef SIMULATION
+    // Debug: Track instruction execution
+    reg [31:0] dbg_cycle;
+    always @(posedge clk or posedge rst) begin
+        if (rst) dbg_cycle <= 0;
+        else dbg_cycle <= dbg_cycle + 1;
+    end
+    
+    always @(posedge clk) begin
+        if (in_valid && dbg_cycle < 7000) begin
+            // LUI
+            if (in_opcode == 7'b0110111) begin
+                $display("[EXU-LUI@%0d] pc=%h rd=%d imm=%h result=%h",
+                    dbg_cycle, in_pc, in_rd, in_imm, alu_result);
+            end
+            // ADDI (I-type ALU, funct3=000)
+            if (in_opcode == 7'b0010011 && in_funct3 == 3'b000) begin
+                $display("[EXU-ADDI@%0d] pc=%h rd=%d rs1=%h imm=%h result=%h",
+                    dbg_cycle, in_pc, in_rd, in_rs1_data, in_imm, alu_result);
+            end
+            // BNE
+            if (in_is_branch && in_funct3 == 3'b001) begin
+                $display("[EXU-BNE@%0d] pc=%h rs1=%h rs2=%h cond=%b taken=%b target=%h",
+                    dbg_cycle, in_pc, in_rs1_data, in_rs2_data, branch_cond, branch_taken, branch_target);
+            end
+        end
+    end
+`endif
     
     // ========== CSR 读取 ==========
     wire [11:0] csr_addr = in_imm[11:0];
