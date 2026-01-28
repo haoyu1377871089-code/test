@@ -8,6 +8,7 @@ AM_HOME ?= $(abspath ../abstract-machine)
 YSYXSOC_BUILD_V = $(YSYX_SOC_HOME)/build/ysyxSoCFull.v
 YSYXSOC_FALLBACK_V = $(YSYX_SOC_HOME)/ysyxSoCTop.sv
 YSYXSOC_V := $(if $(wildcard $(YSYXSOC_BUILD_V)),$(YSYXSOC_BUILD_V),$(YSYXSOC_FALLBACK_V))
+YSYXSOC_GEN_V = $(BUILD_DIR)/ysyxSoCFull.sv
 
 YSYXSOC_PERIP = $(YSYX_SOC_HOME)/perip
 YSYXSOC_PERIP_V = $(shell find $(YSYXSOC_PERIP) -name "*.v" -o -name "*.sv")
@@ -16,7 +17,7 @@ NPC_VSRC = $(NPC_HOME)/vsrc/ysyxsoc
 NPC_VSRC_V = $(shell find $(NPC_VSRC) -maxdepth 1 -name "*.v")
 NPC_PIPELINE_V = $(shell find $(NPC_VSRC)/pipeline -name "*.v")
 
-VSRCS = $(sort $(YSYXSOC_V) $(YSYXSOC_PERIP_V) $(NPC_VSRC_V) $(NPC_PIPELINE_V))
+VSRCS = $(sort $(YSYXSOC_GEN_V) $(YSYXSOC_PERIP_V) $(NPC_VSRC_V) $(NPC_PIPELINE_V))
 
 CSRCS = $(abspath ./csrc/main_soc.cpp) \
         $(abspath ./csrc/memory.cpp) \
@@ -48,6 +49,20 @@ CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(TOPNAME)\"" -std=c++11
 LDFLAGS += -ldl -lrt -lpthread
 
 $(shell mkdir -p $(BUILD_DIR))
+
+$(YSYXSOC_GEN_V): $(YSYXSOC_V)
+	@python3 - <<'PY'
+import pathlib
+src = pathlib.Path("$<")
+dst = pathlib.Path("$@")
+marker = "firrtl_black_box_resource_files.f"
+out = []
+for line in src.read_text().splitlines():
+    if marker in line:
+        break
+    out.append(line)
+dst.write_text("\n".join(out) + "\n")
+PY
 
 soc: VERILATOR_DEFINES = $(SOC_DEFINES) $(EXTRA_DEFINES)
 soc: $(BIN)
