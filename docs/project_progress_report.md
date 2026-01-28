@@ -214,30 +214,22 @@ assign io_ifu_reqValid = icache_mem_req || icache_active;
 // 请求信号在整个 burst 传输期间保持有效
 ```
 
-### 4.6 流水线基本功能验证 (2026-01-28)
+### 4.6 流水线功能验证 (2026-01-28)
 
-**测试**: 裸机测试程序 (`npc/test_bare/bare_test.S`)
+所有裸机测试均通过，验证了流水线的核心功能。测试位于 `npc/test_bare/`。
 
-测试内容：
-- 基本算术指令 (li, add)
-- 分支指令 (beq)
-- ebreak 退出
+| 测试 | 内容 | 结果 | 说明 |
+|------|------|------|------|
+| `bare_test.S` | 基本算术 (li, add)，分支 (beq) | ✅ PASS | 7 条指令，CPI ~1340 |
+| `lsu_test.S` | Load/Store (sw, lw, sh, lhu, sb, lbu) | ✅ PASS | 验证 SRAM 访问 |
+| `raw_test.S` | RAW 数据冒险 (连续 add，load-use) | ✅ PASS | 冒险检测/阻塞正常 |
+| `call_test.S` | 函数调用 (jal/ret)，嵌套调用 | ✅ PASS | 16 条指令 |
+| `dummy_bare.S` | PSRAM 全局变量访问 | ✅ PASS | 验证 0x80000000 访问 |
 
-**测试结果**:
-```
-========== Pipeline NPC Performance Report ==========
-  Total Cycles:   9379
-  Retired Instrs: 7
-  CPI:            1339.85
-=====================================================
-
-HIT GOOD TRAP
-```
-
-**分析**:
-- 流水线基本功能正常工作
-- CPI 高是因为只有 7 条指令，I-Cache 首次 miss (~3000 周期/line) 占主导
-- 这是 Flash 通过 SPI 访问的正常延迟，不是流水线问题
+**性能分析**:
+- CPI 高是因为 I-Cache 首次 miss (~3000 周期/line) 占主导
+- Flash 通过 SPI 访问有较大延迟，这是正常行为
+- 对于长程序，I-Cache hit rate 高 (99.67%)，CPI 会降低
 
 ---
 
