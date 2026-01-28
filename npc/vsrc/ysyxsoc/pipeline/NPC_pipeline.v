@@ -263,7 +263,7 @@ module NPC_pipeline (
     assign stall_if  = mem_busy || stall_id || raw_hazard;
     assign stall_id  = mem_busy || raw_hazard;  // RAW 冒险时阻塞 ID
     assign stall_ex  = mem_busy;
-    assign stall_mem = 1'b0;  // MEM 阶段不暂停
+    assign stall_mem = mem_busy;  // MEM 阶段忙时保持 EX/MEM 寄存器不变
     
     // 控制冒险冲刷: 分支/跳转/异常时冲刷流水线
     wire branch_flush = exu_branch_taken || exu_is_jump;
