@@ -229,21 +229,4 @@ always @(posedge clk or posedge rst) begin
     end
 end
 
-// Debug: IFU_AXI4 state
-`ifdef SIMULATION
-    reg [63:0] ifu_dbg_cycle;
-    always @(posedge clk or posedge rst) begin
-        if (rst) begin
-            ifu_dbg_cycle <= 0;
-        end else begin
-            ifu_dbg_cycle <= ifu_dbg_cycle + 1;
-            if (ifu_dbg_cycle < 50 || (ifu_dbg_cycle < 3000 && m_axi_rvalid)) begin
-                $display("[IFU@%0d] st=%d req=%b addr=%h beat=%d/%d arv=%b arr=%b rv=%b rl=%b",
-                         ifu_dbg_cycle, state, icache_req, m_axi_araddr, beat_count, total_beats,
-                         m_axi_arvalid, m_axi_arready, m_axi_rvalid, m_axi_rlast);
-            end
-        end
-    end
-`endif
-
 endmodule

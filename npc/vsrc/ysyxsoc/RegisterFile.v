@@ -40,6 +40,7 @@ module RegisterFile #(parameter ADDR_WIDTH = 5, parameter DATA_WIDTH = 32) (
   // 如果读取地址是0，直接返回0（R0通常为硬件零）
   assign rdata1 = (raddr1 == {ADDR_WIDTH{1'b0}}) ? {DATA_WIDTH{1'b0}} : rf[raddr1];
   assign rdata2 = (raddr2 == {ADDR_WIDTH{1'b0}}) ? {DATA_WIDTH{1'b0}} : rf[raddr2];
+
   
   // 将内部寄存器值连接到输出接口
   genvar j;

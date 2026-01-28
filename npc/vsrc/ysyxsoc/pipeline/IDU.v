@@ -110,8 +110,8 @@ module IDU (
     end
     
     // ========== 寄存器文件 ==========
-    wire [31:0] rs1_data;
-    wire [31:0] rs2_data;
+    wire [31:0] rs1_data_raw;
+    wire [31:0] rs2_data_raw;
     
     RegisterFile #(.ADDR_WIDTH(5), .DATA_WIDTH(32)) u_regfile (
         .clk    (clk),
@@ -120,10 +120,19 @@ module IDU (
         .waddr  (rf_waddr),
         .wen    (rf_wen),
         .raddr1 (rs1),
-        .rdata1 (rs1_data),
+        .rdata1 (rs1_data_raw),
         .raddr2 (rs2),
-        .rdata2 (rs2_data)
+        .rdata2 (rs2_data_raw)
     );
+    
+    // ========== WBU 写回旁路逻辑 ==========
+    // 当 WBU 正在写入与 IDU 读取相同的寄存器时，直接使用写入数据
+    // 这解决了写和读发生在同一周期的 RAW 冒险
+    wire rs1_bypass = rf_wen && (rf_waddr != 5'b0) && (rs1 == rf_waddr);
+    wire rs2_bypass = rf_wen && (rf_waddr != 5'b0) && (rs2 == rf_waddr);
+    
+    wire [31:0] rs1_data = rs1_bypass ? rf_wdata : rs1_data_raw;
+    wire [31:0] rs2_data = rs2_bypass ? rf_wdata : rs2_data_raw;
     
     // ========== 控制信号生成 ==========
     wire reg_wen = is_r_type || is_i_alu || is_load || is_jal || is_jalr || 

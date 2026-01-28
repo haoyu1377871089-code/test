@@ -87,21 +87,6 @@ reg [TAG_WIDTH-1:0]   refill_tag;
 reg                   refill_way;                 // Which way to fill (from LRU)
 reg [WORD_OFFSET-1:0] refill_word_cnt;            // Current word being filled
 
-// Debug: ICache state
-`ifdef SIMULATION
-    reg [63:0] ic_dbg_cycle;
-    always @(posedge clk or posedge rst) begin
-        if (rst) begin
-            ic_dbg_cycle <= 0;
-        end else begin
-            ic_dbg_cycle <= ic_dbg_cycle + 1;
-            if (ic_dbg_cycle < 50 || (ic_dbg_cycle < 3000 && mem_rvalid)) begin
-                $display("[IC@%0d] st=%d req=%b addr=%h flush=%b memreq=%b rv=%b rl=%b word=%d",
-                         ic_dbg_cycle, state, cpu_req, cpu_addr, cpu_flush, mem_req, mem_rvalid, mem_rlast, refill_word_cnt);
-            end
-        end
-    end
-`endif
 
 // ============================================================
 // Tag Comparison (combinational)

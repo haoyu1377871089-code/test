@@ -354,6 +354,8 @@ module NPC_pipeline (
     wire idu_in_ready;
     
     // ID/EX 级间寄存器更新
+    // 关键修复：当 stall_id=1 但 stall_ex=0 时，需要插入气泡（设置 id_ex_valid=0）
+    // 这防止 EX 阶段重复执行同一条指令
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             id_ex_valid <= 1'b0;
@@ -380,8 +382,17 @@ module NPC_pipeline (
             id_ex_is_fence <= 1'b0;
             id_ex_is_csr <= 1'b0;
         end else if (flush_id) begin
+            // 冲刷时清零 valid
             id_ex_valid <= 1'b0;
-        end else if (!stall_id) begin  // 使用 stall_id 而不是 stall_ex，因为 stall_id 包含 RAW hazard
+        end else if (stall_ex) begin
+            // EX 阶段暂停，保持 ID/EX 不变
+            // （EX/MEM 中的指令还没被 MEM 阶段接收）
+        end else if (stall_id) begin
+            // ID 阶段暂停但 EX 阶段不暂停
+            // 需要在 EX 阶段插入气泡，防止重复执行
+            id_ex_valid <= 1'b0;
+        end else begin
+            // 正常更新
             if (idu_out_valid) begin
                 id_ex_valid <= 1'b1;
                 id_ex_pc <= idu_out_pc;
