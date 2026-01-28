@@ -292,6 +292,19 @@ module NPC_pipeline (
                                      fwd_wb_pending_rs2 ? wb_fwd_data_pending :
                                      idu_out_rs2_data;
     
+    // ========== A0 (x10) 转发逻辑（用于 ebreak exit_code）==========
+    // A0 也需要转发，因为 halt() 中 addi a0, ... 紧接着 ebreak
+    wire fwd_ex_a0 = ex_can_forward && (5'd10 == ex_rd);
+    wire fwd_mem_a0 = mem_can_forward && (5'd10 == mem_rd) && !fwd_ex_a0;
+    wire fwd_wb_wbu_a0 = wb_can_forward_wbu && (5'd10 == wbu_rd) && !fwd_ex_a0 && !fwd_mem_a0;
+    wire fwd_wb_pending_a0 = wb_can_forward_pending && (5'd10 == wb_rd) && !fwd_ex_a0 && !fwd_mem_a0 && !fwd_wb_wbu_a0;
+    
+    wire [31:0] forwarded_a0_data = fwd_ex_a0 ? ex_fwd_data :
+                                    fwd_mem_a0 ? mem_fwd_data :
+                                    fwd_wb_wbu_a0 ? wb_fwd_data_wbu :
+                                    fwd_wb_pending_a0 ? wb_fwd_data_pending :
+                                    idu_out_a0_data;
+    
     // ========== RAW 冒险检测（仅检测无法通过转发解决的冒险）==========
     // Load-use 冒险：EX 阶段是 load 指令，后续指令依赖其结果
     wire load_use_rs1 = id_uses_rs1 && ex_is_load && ex_writes_reg && (id_rs1 == ex_rd);
@@ -491,7 +504,7 @@ module NPC_pipeline (
                 id_ex_is_system <= idu_out_is_system;
                 id_ex_is_fence <= idu_out_is_fence;
                 id_ex_is_csr <= idu_out_is_csr;
-                id_ex_a0_data <= idu_out_a0_data;
+                id_ex_a0_data <= forwarded_a0_data;  // 使用转发后的 a0 数据
             end else begin
                 // ID 阶段被阻塞或无有效输出，插入气泡
                 // 注意：当 stall_id=1 时，ID/EX 中当前指令已经流向 EX/MEM
