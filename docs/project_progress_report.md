@@ -214,7 +214,74 @@ assign io_ifu_reqValid = icache_mem_req || icache_active;
 // 请求信号在整个 burst 传输期间保持有效
 ```
 
-### 4.6 流水线功能验证 (2026-01-28)
+### 4.6 IFU/LSU 仲裁问题 (2026-01-28 修复)
+
+**问题 #6: IFU 和 LSU 同时请求导致 PC 损坏**
+
+**症状**：当程序从 Flash 加载数据然后存储到 PSRAM 时，PC 跳转到随机地址（如 0x300740xx），程序崩溃。
+
+**根因分析**：
+
+D-stage MemBridge 使用单一 AXI master 处理 IFU 和 LSU 请求：
+```verilog
+// MemBridge 的 AR 通道逻辑
+assign io_master_arvalid =
+    (stateI == 0 && io_ifu_reqValid) || (stateI == 1) || lsuRead;
+assign io_master_araddr = lsuRead ? io_lsu_addr : io_ifu_addr;
+```
+
+当 IFU 和 LSU 同时请求时：
+1. `io_master_arvalid = 1`（两者都想请求）
+2. `io_master_araddr = io_lsu_addr`（LSU 地址优先）
+3. 但是 `stateI` 也会前进（因为 `io_ifu_reqValid` 为高）
+4. 响应返回时，IFU 认为收到了自己的响应，但实际数据是 LSU 的
+5. IFU 将错误的数据作为指令执行，导致 PC 损坏
+
+**修复方案**：
+
+在适配器中添加 IFU/LSU 请求仲裁，确保同一时刻只有一个通道发送请求：
+
+```verilog
+// 仲裁状态机
+localparam ARB_IDLE = 2'd0;
+localparam ARB_IFU  = 2'd1;
+localparam ARB_LSU  = 2'd2;
+
+// LSU 优先级更高（流水线需要 LSU 完成才能继续）
+always @(posedge clk) begin
+    case (arb_state)
+        ARB_IDLE: begin
+            if (lsu_req) arb_state <= ARB_LSU;
+            else if (ifu_state == IFU_REQ) arb_state <= ARB_IFU;
+        end
+        ARB_IFU: begin
+            if (io_ifu_respValid && icache_beat_cnt == 2'd3)
+                arb_state <= ARB_IDLE;
+        end
+        ARB_LSU: begin
+            if (io_lsu_respValid) arb_state <= ARB_IDLE;
+        end
+    endcase
+end
+
+// 只有仲裁允许时才发请求
+assign io_ifu_reqValid = (ifu_state == IFU_REQ) && ifu_can_req;
+assign io_lsu_reqValid = lsu_req && lsu_can_req;
+```
+
+**性能影响**：
+
+- IFU 和 LSU 现在串行化，无法并行
+- 当 LSU 访问慢速设备（Flash、PSRAM）时，IFU 必须等待
+- 导致 CPI 从预期的 ~10 增加到 ~200
+
+**后续优化方向**：
+
+1. 实现 D-Cache 减少 LSU 对慢速内存的访问
+2. 优化仲裁策略，允许不同地址区域的并行访问
+3. 或者使用完整 AXI4 接口的 SoC 配置
+
+### 4.7 流水线功能验证 (2026-01-28)
 
 所有裸机测试均通过，验证了流水线的核心功能。测试位于 `npc/test_bare/`。
 
@@ -225,6 +292,9 @@ assign io_ifu_reqValid = icache_mem_req || icache_active;
 | `raw_test.S` | RAW 数据冒险 (连续 add，load-use) | ✅ PASS | 冒险检测/阻塞正常 |
 | `call_test.S` | 函数调用 (jal/ret)，嵌套调用 | ✅ PASS | 16 条指令 |
 | `dummy_bare.S` | PSRAM 全局变量访问 | ✅ PASS | 验证 0x80000000 访问 |
+| `lui_loop_test.S` | LUI+ADDI 循环，大值测试 | ✅ PASS | RAW 冒险检测 |
+| `flash_then_psram_test.S` | Flash 加载 → PSRAM 存储 | ✅ PASS | IFU/LSU 仲裁验证 |
+| `psram_only_test.S` | 纯 PSRAM 操作 | ✅ PASS | 验证 PSRAM 访问 |
 
 **性能分析**:
 - CPI 高是因为 I-Cache 首次 miss (~3000 周期/line) 占主导
