@@ -25,8 +25,8 @@
 |------|----------|------|
 | 阶段1 | 拆分模块 + 串行执行验证（无流水线，仍为多周期） | ✅ 已完成 |
 | 阶段2 | 实现流水线连接 + 简单测试（无 RAW 依赖的程序） | ✅ 已完成 |
-| 阶段3 | 实现 RAW 阻塞 + 带依赖的测试用例 | ✅ 已完成 (CPI ~35) |
-| 阶段4 | 实现转发技术 + 验证性能提升 | ⏳ 待开始 |
+| 阶段3 | 实现 RAW 阻塞 + 带依赖的测试用例 | ✅ 已完成 |
+| 阶段4 | 实现转发技术 + 验证性能提升 | ✅ 已完成 (CPI ~33) |
 | 阶段5 | 实现控制冒险处理 + 分支/跳转测试 | ✅ 已完成（flush 问题已修复） |
 | 阶段6 | 实现异常和 fence.i + 完整测试 | ⏳ 待开始 |
 
@@ -185,12 +185,53 @@ end
    wire raw_hazard = ... || raw_pending_wb || raw_wbu;
    ```
 
-**测试结果**：
+**测试结果（阻塞版本）**：
 - `dummy`: PASSED (CPI 37.99)
 - `microbenchmark`: PASSED (CPI 34.72)
-- `add`, `load-store`, `fib`, `bubble-sort`, `string`: PASSED
-- `quick-sort`, `div`, `mul-longlong`, `fact`, `prime`, `shift`, `bit`, `sum`, `if-else`: PASSED
-- `recursion`: 运行中（递归深度大，需要较长时间）
+- 多数 CPU 测试: PASSED
+
+### 4.5 数据转发实现 (2026-01-28)
+
+**转发路径**：
+- EX → ID: 转发 ALU 结果（非 load 指令）
+- MEM → ID: 转发 ALU 结果或 load 数据
+- WB → ID: 转发 MEM/WB 寄存器或 WBU 正在写回的数据
+
+**关键实现**：
+```verilog
+// 转发条件检测
+wire fwd_ex_rs1 = id_uses_rs1 && ex_writes_reg && !ex_is_load && (id_rs1 == ex_rd);
+wire fwd_mem_rs1 = id_uses_rs1 && mem_fwd_valid && (id_rs1 == mem_rd) && !fwd_ex_rs1;
+wire fwd_pending_wb_rs1 = id_uses_rs1 && pending_wb_writes && (id_rs1 == pending_wb_rd) && ...;
+wire fwd_wb_rs1 = id_uses_rs1 && wb_writes_reg && (id_rs1 == wb_rd) && ...;
+
+// 转发数据选择（优先级：EX > MEM > pending_WB > WB）
+wire [31:0] fwd_rs1_data = fwd_ex_rs1  ? ex_fwd_data  :
+                          fwd_mem_rs1 ? mem_fwd_data :
+                          fwd_pending_wb_rs1 ? pending_wb_data :
+                          fwd_wb_rs1  ? wb_fwd_data  :
+                          idu_out_rs1_data;
+```
+
+**Load-Use 阻塞**：
+```verilog
+// 当 EX 阶段是 load 且 ID 阶段需要其结果时，必须阻塞
+wire load_use_hazard = (id_uses_rs1 && ex_is_load && (id_rs1 == ex_rd)) ||
+                       (id_uses_rs2 && ex_is_load && (id_rs2 == ex_rd));
+```
+
+**性能改善**：
+| 测试 | 阻塞版 CPI | 转发版 CPI | 改善 |
+|-----|----------|----------|------|
+| dummy | 37.99 | 36.22 | 4.7% |
+| microbench | 34.72 | 33.63 | 3.1% |
+| add | 9.77 | 9.46 | 3.2% |
+| load-store | 33.84 | 32.58 | 3.7% |
+
+CPI 仍较高的原因：
+1. 内存访问延迟高（Flash/PSRAM ~700 cycles）
+2. Load-use 阻塞仍存在
+3. 控制冒险需要 flush 流水线
 
 ---
 
