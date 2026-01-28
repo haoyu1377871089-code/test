@@ -10,6 +10,7 @@
 !board/*
 !*.v
 !*.cpp
+!src/at_scancode.h
 !usr/
 !usr/include/
 !usr/include/pins.h
