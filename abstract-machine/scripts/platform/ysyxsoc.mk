@@ -26,11 +26,11 @@ CFLAGS += -DMAINARGS_MAX_LEN=$(MAINARGS_MAX_LEN) -DMAINARGS_PLACEHOLDER=$(MAINAR
 ifneq ($(SRAM_RUN)$(PSRAM_RUN),)
 $(IMAGE).bin: $(IMAGE).elf
 	@$(OBJCOPY) -S -j .boot -j .text -j .rodata -j .data -O binary $< $@
-	@python $(AM_HOME)/tools/insert-arg.py $@ $(MAINARGS_MAX_LEN) $(MAINARGS_PLACEHOLDER) "$(mainargs)"
+	@python3 $(AM_HOME)/tools/insert-arg.py $@ $(MAINARGS_MAX_LEN) $(MAINARGS_PLACEHOLDER) "$(mainargs)"
 else
 $(IMAGE).bin: $(IMAGE).elf
 	@$(OBJCOPY) -S -j .text -j .rodata -j .data -O binary $< $@
-	@python $(AM_HOME)/tools/insert-arg.py $@ $(MAINARGS_MAX_LEN) $(MAINARGS_PLACEHOLDER) "$(mainargs)"
+	@python3 $(AM_HOME)/tools/insert-arg.py $@ $(MAINARGS_MAX_LEN) $(MAINARGS_PLACEHOLDER) "$(mainargs)"
 endif
 
 image: $(IMAGE).bin
