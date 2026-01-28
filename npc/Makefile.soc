@@ -20,7 +20,8 @@ VSRCS = $(sort $(YSYXSOC_V) $(YSYXSOC_PERIP_V) $(NPC_VSRC_V) $(NPC_PIPELINE_V))
 
 CSRCS = $(abspath ./csrc/main_soc.cpp) \
         $(abspath ./csrc/memory.cpp) \
-        $(abspath ./csrc/dev/devices.cpp)
+        $(abspath ./csrc/dev/devices.cpp) \
+        $(abspath ./csrc/nvboard_stub.cpp)
 
 BUILD_DIR = ./build_soc
 OBJ_DIR = $(BUILD_DIR)/obj_dir

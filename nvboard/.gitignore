@@ -10,4 +10,7 @@
 !board/*
 !*.v
 !*.cpp
+!usr/
+!usr/include/
+!usr/include/pins.h
 build/
