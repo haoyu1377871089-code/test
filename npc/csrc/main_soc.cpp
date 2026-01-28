@@ -163,14 +163,7 @@ int main(int argc, char **argv) {
         time++;
         
         if (time % 10000000 == 0) {
-            std::cout << "Time: " << time 
-                      << " VGA: valid=" << (int)top->externalPins_vga_valid
-                      << " hsync=" << (int)top->externalPins_vga_hsync
-                      << " vsync=" << (int)top->externalPins_vga_vsync
-                      << " R=" << (int)top->externalPins_vga_r
-                      << " G=" << (int)top->externalPins_vga_g
-                      << " B=" << (int)top->externalPins_vga_b
-                      << std::endl;
+            std::cout << "Time: " << time << std::endl;
         }
     }
     

@@ -20,7 +20,7 @@ VERILATOR       := verilator
 VERILATOR_CFLAGS := -MMD --build -cc \
     -O3 --x-assign fast --x-initial fast --noassert \
     -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-TIMESCALEMOD -Wno-CASEINCOMPLETE \
-    --trace +define+SIMULATION
+    --no-timing --trace +define+SIMULATION
 
 # ysyxSoC Verilog 文件 (优先使用 build 目录，否则使用 ready-to-run)
 YSYXSOC_VERILOG := $(wildcard $(YSYXSOC_DIR)/build/ysyxSoCFull.v)
@@ -30,10 +30,14 @@ endif
 
 # NPC Verilog 文件 (ysyxsoc 配置)
 NPC_VSRC_DIR    := $(NPC_DIR)/vsrc/ysyxsoc
-NPC_VSRCS       := $(shell find $(NPC_VSRC_DIR) -name "*.v" ! -path "*/pipeline/*")
+NPC_VSRCS_ALL   := $(shell find $(NPC_VSRC_DIR) -name "*.v" ! -path "*/pipeline/*")
+# 非流水线版本的源文件
+NPC_VSRCS       := $(NPC_VSRCS_ALL)
+# 流水线版本排除 ysyx_00000000.v (使用 ysyx_dstage_adapter.v 代替)
+NPC_VSRCS_PIPE  := $(filter-out $(NPC_VSRC_DIR)/ysyx_00000000.v, $(NPC_VSRCS_ALL))
 
-# 流水线版本 Verilog 文件
-PIPELINE_VSRCS  := $(shell find $(NPC_VSRC_DIR)/pipeline -name "*.v")
+# 流水线版本 Verilog 文件 (排除 ysyx_pipeline_top.v，使用 ysyx_dstage_adapter.v)
+PIPELINE_VSRCS  := $(shell find $(NPC_VSRC_DIR)/pipeline -name "*.v" ! -name "ysyx_pipeline_top.v")
 
 # 外设 Verilog 文件
 PERIP_DIR       := $(YSYXSOC_DIR)/perip
@@ -42,7 +46,8 @@ PERIP_VSRCS     := $(shell find $(PERIP_DIR) -name "*.v")
 # C++ 源文件
 CSRC_DIR        := $(NPC_DIR)/csrc
 CSRCS           := $(CSRC_DIR)/main_soc.cpp \
-                   $(CSRC_DIR)/dev/devices.cpp
+                   $(CSRC_DIR)/dev/devices.cpp \
+                   $(CSRC_DIR)/memory.cpp
 
 # 编译标志
 SDL2_CFLAGS     := $(shell pkg-config --cflags sdl2 2>/dev/null)
@@ -52,7 +57,11 @@ ifeq ($(strip $(SDL2_CFLAGS)),)
     SDL2_LDFLAGS := -lSDL2
 endif
 
-CXXFLAGS        := -std=c++17 -DTOP_NAME="\"VysyxSoCFull\"" $(SDL2_CFLAGS) -DNO_NVBOARD
+# AM_HOME 路径
+AM_HOME         ?= $(NPC_DIR)/../abstract-machine
+
+CXXFLAGS        := -std=c++17 -DTOP_NAME="\"VysyxSoCFull\"" $(SDL2_CFLAGS) -DNO_NVBOARD \
+                   -I$(AM_HOME)/am/include
 LDFLAGS         := -ldl -lrt -lpthread $(SDL2_LDFLAGS)
 
 # Include 路径
@@ -95,9 +104,9 @@ soc: $(NVBOARD_STUB)
 		--Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
 	@echo "Build complete: $(BIN)"
 
-# 流水线版本 (使用 pipeline/*.v 和 ysyx_pipeline_top.v)
+# 流水线版本 (使用 pipeline/*.v 和 ysyx_dstage_adapter.v)
 pipeline: DEFINES := +define+ENABLE_PIPELINE +define+ENABLE_ICACHE
-pipeline: VSRCS := $(YSYXSOC_VERILOG) $(NPC_VSRCS) $(PIPELINE_VSRCS) $(PERIP_VSRCS)
+pipeline: VSRCS := $(YSYXSOC_VERILOG) $(NPC_VSRCS_PIPE) $(PIPELINE_VSRCS) $(PERIP_VSRCS)
 pipeline: $(NVBOARD_STUB)
 	@echo "Building ysyxSoC with pipeline NPC..."
 	@rm -rf $(OBJ_DIR)
