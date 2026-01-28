@@ -103,6 +103,7 @@ wire raw_wb_rs1 = id_uses_rs1 && ((wb_writes_reg && (id_rs1 == wbu_rf_waddr)) ||
 - `addi sp, sp, -4` 得到正确结果（`0x0f002000`）
 - 程序能继续执行，进入 `uart_init`
 - 但陷入 `uart_init` 的延迟循环
+- **最新进展（2026-01-28）**：已成功构建流水线版本仿真器，程序能运行并执行指令（commits在增加），但UART输出尚未正常工作
 
 ### 4.3 已修复问题 (2026-01-28 持续修复)
 
