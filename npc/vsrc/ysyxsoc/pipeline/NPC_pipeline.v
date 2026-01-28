@@ -166,6 +166,7 @@ module NPC_pipeline (
     reg        ex_mem_mret;
     
     // ========== MEM 阶段信号 ==========
+    wire        lsu_in_ready;
     wire        lsu_out_valid;
     wire        lsu_out_ready;
     wire [31:0] lsu_out_pc;
@@ -197,6 +198,7 @@ module NPC_pipeline (
     reg        mem_wb_mret;
     
     // ========== WB 阶段信号 ==========
+    wire        wbu_in_ready;
     wire        wbu_rf_wen;
     wire [4:0]  wbu_rf_waddr;
     wire [31:0] wbu_rf_wdata;
@@ -213,8 +215,11 @@ module NPC_pipeline (
     
     // ========== 冒险检测和暂停逻辑 ==========
     
-    // 结构冒险: MEM 阶段访存时需要暂停
-    wire mem_busy = ex_mem_valid && (ex_mem_mem_ren || ex_mem_mem_wen) && !lsu_out_valid;
+    // 结构冒险: MEM 阶段忙（LSU 未准备好接收新指令）
+    wire mem_busy = ex_mem_valid && !lsu_in_ready;
+
+    wire stall_id_raw = raw_hazard;
+    wire stall_id_mem = mem_busy;
     
     // ========== RAW 数据冒险检测 ==========
     // 检测 ID 阶段源寄存器与后续阶段目标寄存器的冲突
@@ -251,10 +256,10 @@ module NPC_pipeline (
     // 暂停信号
     // stall_if: IF 阶段只在 MEM busy 或下游阻塞时暂停
     // 注意: if_waiting 不应该阻塞 IF 自己，它只是等待取指完成的状态
-    assign stall_if  = mem_busy || stall_id || raw_hazard;
-    assign stall_id  = mem_busy || raw_hazard;  // RAW 冒险时阻塞 ID
-    assign stall_ex  = mem_busy;
-    assign stall_mem = 1'b0;  // MEM 阶段不暂停
+    assign stall_if  = stall_id_mem || stall_id_raw;
+    assign stall_id  = stall_id_mem || stall_id_raw;  // RAW 冒险或 MEM 背压
+    assign stall_ex  = stall_id_mem;
+    assign stall_mem = stall_id_mem;  // MEM 阶段背压时暂停
     
     // 控制冒险冲刷: 分支/跳转/异常时冲刷流水线
     wire branch_flush = exu_branch_taken || exu_is_jump;
@@ -373,7 +378,12 @@ module NPC_pipeline (
             id_ex_is_csr <= 1'b0;
         end else if (flush_id) begin
             id_ex_valid <= 1'b0;
-        end else if (!stall_id) begin  // 使用 stall_id 而不是 stall_ex，因为 stall_id 包含 RAW hazard
+        end else if (stall_id_mem) begin
+            // MEM 背压：保持 EX 阶段指令不变
+        end else if (stall_id_raw) begin
+            // RAW 冒险：在 EX 插入气泡
+            id_ex_valid <= 1'b0;
+        end else begin  // 正常推进
             if (idu_out_valid) begin
                 id_ex_valid <= 1'b1;
                 id_ex_pc <= idu_out_pc;
@@ -464,6 +474,10 @@ module NPC_pipeline (
     wire lsu_in_valid = ex_mem_valid;
     
     // MEM/WB 级间寄存器更新
+    wire mem_wb_ready = wbu_in_ready || !mem_wb_valid;
+
+    assign lsu_out_ready = mem_wb_ready;
+
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             mem_wb_valid <= 1'b0;
@@ -479,9 +493,9 @@ module NPC_pipeline (
             mem_wb_ebreak <= 1'b0;
             mem_wb_ecall <= 1'b0;
             mem_wb_mret <= 1'b0;
-        end else begin
+        end else if (mem_wb_ready) begin
+            mem_wb_valid <= lsu_out_valid;
             if (lsu_out_valid) begin
-                mem_wb_valid <= 1'b1;
                 mem_wb_pc <= lsu_out_pc;
                 mem_wb_inst <= lsu_out_inst;
                 mem_wb_result <= lsu_out_result;
@@ -494,8 +508,6 @@ module NPC_pipeline (
                 mem_wb_ebreak <= lsu_out_ebreak;
                 mem_wb_ecall <= lsu_out_ecall;
                 mem_wb_mret <= lsu_out_mret;
-            end else begin
-                mem_wb_valid <= 1'b0;
             end
         end
     end
@@ -608,7 +620,7 @@ module NPC_pipeline (
         .clk         (clk),
         .rst         (rst),
         .in_valid    (lsu_in_valid),
-        .in_ready    (),
+        .in_ready    (lsu_in_ready),
         .in_pc       (ex_mem_pc),
         .in_inst     (ex_mem_inst),
         .in_alu_result(ex_mem_alu_result),
@@ -627,7 +639,7 @@ module NPC_pipeline (
         .in_ecall    (ex_mem_ecall),
         .in_mret     (ex_mem_mret),
         .out_valid   (lsu_out_valid),
-        .out_ready   (1'b1),  // WB 阶段总是准备接收
+        .out_ready   (lsu_out_ready),  // 与 MEM/WB 握手
         .out_pc      (lsu_out_pc),
         .out_inst    (lsu_out_inst),
         .out_result  (lsu_out_result),
@@ -655,7 +667,7 @@ module NPC_pipeline (
         .clk         (clk),
         .rst         (rst),
         .in_valid    (wbu_in_valid),
-        .in_ready    (),
+        .in_ready    (wbu_in_ready),
         .in_pc       (mem_wb_pc),
         .in_inst     (mem_wb_inst),
         .in_result   (mem_wb_result),
