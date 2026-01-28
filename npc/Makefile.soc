@@ -55,8 +55,10 @@ ifdef PIPELINE
     VERILATOR_FLAGS += +define+ENABLE_PIPELINE
 endif
 
-# I-Cache 默认启用
-VERILATOR_FLAGS += +define+ENABLE_ICACHE
+# I-Cache 配置 (可通过 NO_ICACHE=1 禁用)
+ifndef NO_ICACHE
+    VERILATOR_FLAGS += +define+ENABLE_ICACHE
+endif
 
 # 所有 Verilog 文件
 ALL_VSRCS = $(YSYXSOC_VFILE) $(PERIP_VSRCS) $(NPC_VSRCS)
