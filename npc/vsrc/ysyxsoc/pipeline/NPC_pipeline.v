@@ -379,10 +379,34 @@ module NPC_pipeline (
             // 指令从 EX 阶段移出时清零 id_ex_valid
             if (exu_out_valid && !flush_ex) begin
                 id_ex_valid <= 1'b0;
-            end
-            
-            // 新指令进入 EX 阶段
-            if (idu_out_valid && !flush_id) begin
+                // 如果同时有新指令进入，则立即设置
+                if (idu_out_valid && !flush_id) begin
+                    id_ex_valid <= 1'b1;
+                    id_ex_pc <= idu_out_pc;
+                    id_ex_inst <= idu_out_inst;
+                    id_ex_rs1_data <= idu_out_rs1_data;
+                    id_ex_rs2_data <= idu_out_rs2_data;
+                    id_ex_imm <= idu_out_imm;
+                    id_ex_rd <= idu_out_rd;
+                    id_ex_rs1 <= idu_out_rs1;
+                    id_ex_rs2 <= idu_out_rs2;
+                    id_ex_opcode <= idu_out_opcode;
+                    id_ex_funct3 <= idu_out_funct3;
+                    id_ex_funct7 <= idu_out_funct7;
+                    id_ex_reg_wen <= idu_out_reg_wen;
+                    id_ex_mem_ren <= idu_out_mem_ren;
+                    id_ex_mem_wen <= idu_out_mem_wen;
+                    id_ex_is_branch <= idu_out_is_branch;
+                    id_ex_is_jal <= idu_out_is_jal;
+                    id_ex_is_jalr <= idu_out_is_jalr;
+                    id_ex_is_lui <= idu_out_is_lui;
+                    id_ex_is_auipc <= idu_out_is_auipc;
+                    id_ex_is_system <= idu_out_is_system;
+                    id_ex_is_fence <= idu_out_is_fence;
+                    id_ex_is_csr <= idu_out_is_csr;
+                end
+            end else if (idu_out_valid && !flush_id) begin
+                // 新指令进入 EX 阶段（没有指令移出）
                 id_ex_valid <= 1'b1;
                 id_ex_pc <= idu_out_pc;
                 id_ex_inst <= idu_out_inst;
@@ -407,6 +431,7 @@ module NPC_pipeline (
                 id_ex_is_fence <= idu_out_is_fence;
                 id_ex_is_csr <= idu_out_is_csr;
             end
+            // 如果既没有指令移出，也没有新指令进入，id_ex_valid 保持原值
         end
     end
     
