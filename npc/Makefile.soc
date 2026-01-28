@@ -1,0 +1,73 @@
+TOPNAME = ysyxSoCFull
+
+YSYX_SOC_HOME ?= $(abspath ../ysyxSoC)
+NPC_HOME ?= $(abspath .)
+AM_HOME ?= $(abspath ../abstract-machine)
+NVBOARD_HOME ?= $(abspath ../nvboard)
+NO_NVBOARD ?= 1
+
+VERILATOR = verilator
+VERILATOR_CFLAGS_BASE += -MMD --build -cc --timing --trace -Wno-TIMESCALEMOD -Wno-fatal \
+	-O3 --x-assign fast --x-initial fast --noassert \
+	+define+SIMULATION +define+ENABLE_ICACHE
+
+BUILD_DIR = ./build_soc
+OBJ_DIR = $(BUILD_DIR)/obj_dir
+BIN = $(BUILD_DIR)/$(TOPNAME)
+
+VSRCS = $(YSYX_SOC_HOME)/build/ysyxSoCFull.v
+VSRCS += $(shell find $(YSYX_SOC_HOME)/perip -name "*.v")
+VSRCS += $(shell find $(abspath ./vsrc/ysyxsoc) -name "*.v")
+
+CSRCS = $(shell find $(abspath ./csrc) -name "*.c" -o -name "*.cc" -o -name "*.cpp")
+CSRCS := $(filter-out $(abspath ./csrc/main.cpp) \
+	$(abspath ./csrc/loop.cpp) \
+	$(abspath ./csrc/program.cpp), $(CSRCS))
+
+# SDL2 flags (via pkg-config; fallback to common defaults)
+SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null)
+SDL2_LDFLAGS := $(shell pkg-config --libs sdl2 2>/dev/null)
+ifeq ($(strip $(SDL2_CFLAGS)),)
+SDL2_CFLAGS := -I/usr/include/SDL2
+SDL2_LDFLAGS := -lSDL2
+endif
+
+ifneq ($(NO_NVBOARD),1)
+# rules for NVBoard
+include $(NVBOARD_HOME)/scripts/nvboard.mk
+NVBOARD_DEP = $(NVBOARD_ARCHIVE)
+else
+NVBOARD_DEP =
+CXXFLAGS += -DNO_NVBOARD
+endif
+
+INC_PATH ?= $(abspath ./vsrc/ysyxsoc) \
+	$(YSYX_SOC_HOME)/perip/spi/rtl \
+	$(YSYX_SOC_HOME)/perip/uart16550/rtl
+INCFLAGS = $(addprefix -I, $(INC_PATH))
+
+CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(TOPNAME)\"" -std=c++20 -I$(AM_HOME)/am/include $(SDL2_CFLAGS)
+LDFLAGS += -ldl -lrt -lpthread $(SDL2_LDFLAGS)
+
+$(shell mkdir -p $(BUILD_DIR))
+
+define verilate
+	@rm -rf $(OBJ_DIR)
+	$(VERILATOR) $(VERILATOR_CFLAGS_BASE) $(1) \
+		$(addprefix -I, $(INC_PATH)) \
+		-I$(YSYX_SOC_HOME) \
+		--top-module $(TOPNAME) $(VSRCS) $(CSRCS) $(NVBOARD_DEP) \
+		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
+		--Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
+endef
+
+.PHONY: soc pipeline clean
+
+soc: $(NVBOARD_DEP)
+	$(call verilate,)
+
+pipeline: $(NVBOARD_DEP)
+	$(call verilate,+define+ENABLE_PIPELINE)
+
+clean:
+	rm -rf $(BUILD_DIR)

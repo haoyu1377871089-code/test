@@ -3,7 +3,9 @@
 #include "verilated_vcd_c.h"
 #include <iostream>
 #include <cstring>
+#ifndef NO_NVBOARD
 #include <nvboard.h>
+#endif
 #include <signal.h>
 
 extern "C" void flash_init_test_data();
@@ -11,11 +13,13 @@ extern "C" void flash_load_program(const char* filename, uint32_t flash_offset);
 extern "C" bool npc_request_exit();
 extern "C" void npc_set_exit_after_frames(int n);
 
+#ifndef NO_NVBOARD
 // NVBoard's UART divisor counter - set to large value to disable NVBoard UART sampling
 extern int16_t uart_divisor_cnt;
 
-// NVBoard auto-generated function declaration
-void nvboard_bind_all_pins(VysyxSoCFull* top);
+// NVBoard auto-generated function declaration (weak to allow no-bind builds)
+void nvboard_bind_all_pins(VysyxSoCFull* top) __attribute__((weak));
+#endif
 
 static volatile bool sig_exit = false;
 void sigint_handler(int) { sig_exit = true; }
@@ -79,7 +83,8 @@ int main(int argc, char **argv) {
     const char* imgPath = nullptr;
     
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-n") == 0 || strcmp(argv[i], "--no-gui") == 0) {
+        if (strcmp(argv[i], "-n") == 0 || strcmp(argv[i], "--no-gui") == 0 ||
+            strcmp(argv[i], "--no-nvboard") == 0) {
             no_gui = true;
         } else if (argv[i][0] != '-') {
             imgPath = argv[i];
@@ -91,6 +96,7 @@ int main(int argc, char **argv) {
         std::cout << "  image: binary to load into Flash at 0x30000000" << std::endl;
         std::cout << "Options:" << std::endl;
         std::cout << "  -n, --no-gui    Disable NVBoard GUI window" << std::endl;
+        std::cout << "  --no-nvboard    Alias of --no-gui" << std::endl;
         return 0;
     }
 
@@ -111,7 +117,8 @@ int main(int argc, char **argv) {
     tfp->open("build_soc/trace.vcd");
 
     // Initialize NVBoard (unless --no-gui)
-    if (!no_gui) {
+    #ifndef NO_NVBOARD
+    if (!no_gui && nvboard_bind_all_pins) {
         nvboard_bind_all_pins(top);
         nvboard_init();
         
@@ -119,6 +126,7 @@ int main(int argc, char **argv) {
         // We use our own uart_tick() for stdout output
         uart_divisor_cnt = 32767;  // Set to max int16_t to effectively disable
     }
+    #endif
 
     top->reset = 1;
     top->clock = 0;
@@ -164,9 +172,11 @@ int main(int argc, char **argv) {
               << ", request_exit=" << npc_request_exit() 
               << ", uart_chars=" << uart_char_count << std::endl;
 
+    #ifndef NO_NVBOARD
     if (!no_gui) {
         nvboard_quit();
     }
+    #endif
     tfp->close();
     delete top;
     return 0;

@@ -168,6 +168,7 @@ module NPC_pipeline (
     // ========== MEM 阶段信号 ==========
     wire        lsu_out_valid;
     wire        lsu_out_ready;
+    wire        lsu_in_ready;
     wire [31:0] lsu_out_pc;
     wire [31:0] lsu_out_inst;
     wire [31:0] lsu_out_result;
@@ -210,11 +211,13 @@ module NPC_pipeline (
     wire [31:0] wbu_exit_code;
     wire        wbu_inst_commit;
     wire [31:0] wbu_commit_pc;
+    wire        wbu_in_ready;
+    wire        mem_wb_ready;
     
     // ========== 冒险检测和暂停逻辑 ==========
     
-    // 结构冒险: MEM 阶段访存时需要暂停
-    wire mem_busy = ex_mem_valid && (ex_mem_mem_ren || ex_mem_mem_wen) && !lsu_out_valid;
+    // MEM 阶段忙: LSU 无法接受新指令
+    wire mem_busy = ex_mem_valid && !lsu_in_ready;
     
     // ========== RAW 数据冒险检测 ==========
     // 检测 ID 阶段源寄存器与后续阶段目标寄存器的冲突
@@ -233,28 +236,34 @@ module NPC_pipeline (
     wire [4:0] mem_rd = ex_mem_rd;
     wire mem_writes_reg = ex_mem_valid && ex_mem_reg_wen && (mem_rd != 5'b0);
     
-    // WB 阶段的目标寄存器（已经在当前周期写入寄存器堆，不会冲突）
-    // 但 MEM/WB 寄存器中的数据还没写入，需要检测
-    wire [4:0] wb_rd = mem_wb_rd;
-    wire wb_writes_reg = mem_wb_valid && mem_wb_reg_wen && (wb_rd != 5'b0);
+    // WB 阶段：使用 WBU 实际写回信号 + MEM/WB pending
+    wire wb_writes_reg = wbu_rf_wen && (wbu_rf_waddr != 5'b0);
+    wire [4:0] pending_wb_rd = mem_wb_rd;
+    wire pending_wb_writes = mem_wb_valid && mem_wb_reg_wen && (pending_wb_rd != 5'b0);
     
     // RAW 冒险检测
     wire raw_ex_rs1 = id_uses_rs1 && ex_writes_reg && (id_rs1 == ex_rd);
     wire raw_ex_rs2 = id_uses_rs2 && ex_writes_reg && (id_rs2 == ex_rd);
     wire raw_mem_rs1 = id_uses_rs1 && mem_writes_reg && (id_rs1 == mem_rd);
     wire raw_mem_rs2 = id_uses_rs2 && mem_writes_reg && (id_rs2 == mem_rd);
-    wire raw_wb_rs1 = id_uses_rs1 && wb_writes_reg && (id_rs1 == wb_rd);
-    wire raw_wb_rs2 = id_uses_rs2 && wb_writes_reg && (id_rs2 == wb_rd);
+    wire raw_wb_rs1 = id_uses_rs1 &&
+                      ((wb_writes_reg && (id_rs1 == wbu_rf_waddr)) ||
+                       (pending_wb_writes && (id_rs1 == pending_wb_rd)));
+    wire raw_wb_rs2 = id_uses_rs2 &&
+                      ((wb_writes_reg && (id_rs2 == wbu_rf_waddr)) ||
+                       (pending_wb_writes && (id_rs2 == pending_wb_rd)));
     
     wire raw_hazard = raw_ex_rs1 || raw_ex_rs2 || raw_mem_rs1 || raw_mem_rs2 || raw_wb_rs1 || raw_wb_rs2;
     
     // 暂停信号
     // stall_if: IF 阶段只在 MEM busy 或下游阻塞时暂停
     // 注意: if_waiting 不应该阻塞 IF 自己，它只是等待取指完成的状态
-    assign stall_if  = mem_busy || stall_id || raw_hazard;
-    assign stall_id  = mem_busy || raw_hazard;  // RAW 冒险时阻塞 ID
-    assign stall_ex  = mem_busy;
-    assign stall_mem = 1'b0;  // MEM 阶段不暂停
+    wire stall_id_raw = raw_hazard;
+    wire stall_id_mem = mem_busy;
+    assign stall_id  = stall_id_raw || stall_id_mem;  // RAW 冒险或 MEM 忙时阻塞 ID
+    assign stall_if  = stall_id;
+    assign stall_ex  = stall_id_mem;
+    assign stall_mem = stall_id_mem;
     
     // 控制冒险冲刷: 分支/跳转/异常时冲刷流水线
     wire branch_flush = exu_branch_taken || exu_is_jump;
@@ -373,7 +382,13 @@ module NPC_pipeline (
             id_ex_is_csr <= 1'b0;
         end else if (flush_id) begin
             id_ex_valid <= 1'b0;
-        end else if (!stall_id) begin  // 使用 stall_id 而不是 stall_ex，因为 stall_id 包含 RAW hazard
+        end else if (stall_id_mem) begin
+            // MEM 忙时保持当前 ID/EX，避免覆盖 EX 阶段指令
+            id_ex_valid <= id_ex_valid;
+        end else if (stall_id_raw) begin
+            // RAW 冒险插入气泡
+            id_ex_valid <= 1'b0;
+        end else begin
             if (idu_out_valid) begin
                 id_ex_valid <= 1'b1;
                 id_ex_pc <= idu_out_pc;
@@ -479,7 +494,9 @@ module NPC_pipeline (
             mem_wb_ebreak <= 1'b0;
             mem_wb_ecall <= 1'b0;
             mem_wb_mret <= 1'b0;
-        end else begin
+        end else if (wbu_exception_valid) begin
+            mem_wb_valid <= 1'b0;
+        end else if (mem_wb_ready) begin
             if (lsu_out_valid) begin
                 mem_wb_valid <= 1'b1;
                 mem_wb_pc <= lsu_out_pc;
@@ -504,6 +521,8 @@ module NPC_pipeline (
     
     // WBU 输入控制
     wire wbu_in_valid = mem_wb_valid;
+    assign mem_wb_ready = !mem_wb_valid || wbu_in_ready;
+    assign lsu_out_ready = mem_wb_ready;
     
     // ========== 模块实例化 ==========
     
@@ -608,7 +627,7 @@ module NPC_pipeline (
         .clk         (clk),
         .rst         (rst),
         .in_valid    (lsu_in_valid),
-        .in_ready    (),
+        .in_ready    (lsu_in_ready),
         .in_pc       (ex_mem_pc),
         .in_inst     (ex_mem_inst),
         .in_alu_result(ex_mem_alu_result),
@@ -627,7 +646,7 @@ module NPC_pipeline (
         .in_ecall    (ex_mem_ecall),
         .in_mret     (ex_mem_mret),
         .out_valid   (lsu_out_valid),
-        .out_ready   (1'b1),  // WB 阶段总是准备接收
+        .out_ready   (lsu_out_ready),
         .out_pc      (lsu_out_pc),
         .out_inst    (lsu_out_inst),
         .out_result  (lsu_out_result),
@@ -647,7 +666,7 @@ module NPC_pipeline (
         .mem_wmask   (lsu_wmask),
         .mem_rvalid  (lsu_rvalid),
         .mem_rdata   (lsu_rdata),
-        .flush       (1'b0)
+        .flush       (wbu_exception_valid)
     );
     
     // WBU
@@ -655,7 +674,7 @@ module NPC_pipeline (
         .clk         (clk),
         .rst         (rst),
         .in_valid    (wbu_in_valid),
-        .in_ready    (),
+        .in_ready    (wbu_in_ready),
         .in_pc       (mem_wb_pc),
         .in_inst     (mem_wb_inst),
         .in_result   (mem_wb_result),
