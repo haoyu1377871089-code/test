@@ -11,11 +11,12 @@
 | 项目 | 当前状态 |
 |------|----------|
 | 指令集 | RV32E |
-| 处理器架构 | 多周期 → 五级流水线（开发中） |
+| 处理器架构 | 五级流水线（**已完成基础功能，可运行 microbench**） |
 | I-Cache | 4KB, 2-way, 16B line, 99.67% hit rate |
 | D-Cache | 已实现，可选启用 |
 | 总线协议 | AXI4 Burst |
-| 当前 CPI | ~56（多周期版本） |
+| 多周期 CPI | ~56 |
+| **流水线 CPI** | **~50**（已验证） |
 
 ---
 
@@ -24,11 +25,11 @@
 | 阶段 | 任务内容 | 状态 |
 |------|----------|------|
 | 阶段1 | 拆分模块 + 串行执行验证（无流水线，仍为多周期） | ✅ 已完成 |
-| 阶段2 | 实现流水线连接 + 简单测试（无 RAW 依赖的程序） | 🔄 进行中 |
-| 阶段3 | 实现 RAW 阻塞 + 带依赖的测试用例 | 🔄 进行中（已实现基础逻辑） |
-| 阶段4 | 实现转发技术 + 验证性能提升 | ⏳ 待开始 |
-| 阶段5 | 实现控制冒险处理 + 分支/跳转测试 | 🔄 进行中（发现 flush 问题） |
-| 阶段6 | 实现异常和 fence.i + 完整测试 | ⏳ 待开始 |
+| 阶段2 | 实现流水线连接 + 简单测试（无 RAW 依赖的程序） | ✅ 已完成 |
+| 阶段3 | 实现 RAW 阻塞 + 带依赖的测试用例 | ✅ 已完成（含转发） |
+| 阶段4 | 实现转发技术 + 验证性能提升 | ✅ 已完成 |
+| 阶段5 | 实现控制冒险处理 + 分支/跳转测试 | ✅ 已完成（修复 JALR bug） |
+| 阶段6 | 实现异常和 fence.i + 完整测试 | ✅ 已完成（microbench 通过） |
 
 ---
 
@@ -146,15 +147,40 @@ end else if (out_valid && out_ready) begin
 end
 ```
 
-### 4.4 待解决问题
+### 4.4 已修复问题 #6：JALR 返回地址错误（关键 bug）
 
-1. **store/load 指令被跳过**
-   - 需检查 flush 信号是否错误地冲刷了 MEM 阶段的指令
-   - 检查 EX/MEM 寄存器在 flush 时的处理
+**问题发现**：在 microbench 测试中，`bench_qsort_prepare` 函数被调用了 3 次，而多周期版本只调用 1 次。这导致内存分配超出限制。
 
-2. **分支重复提交**
-   - MEM/WB 的 valid 信号清零时序需要与 LSU out_valid 协调
-   - 可能需要在 MEM/WB 层级增加握手确认机制
+**根因分析**：
+
+在 `EXU_pipeline.v` 中，JALR 指令的处理有 bug：
+```verilog
+// 原代码：JALR 的 alu_result 是跳转目标，而非返回地址
+7'b1100111: alu_result = (alu_a + alu_b) & 32'hFFFFFFFE;  // 错误！
+```
+
+根据 RISC-V 规范，JALR 应该：
+- `rd = PC + 4`（返回地址）
+- `PC = (rs1 + imm) & ~1`（跳转目标）
+
+但原实现将跳转目标 `(rs1 + imm)` 写入了 `rd`，导致函数调用时 `ra` 寄存器存储了错误的值。
+
+**修复方案**：
+```verilog
+// 修复后：JALR 的 alu_result 是返回地址 (PC+4)
+7'b1100111: alu_result = in_pc + 32'd4;
+
+// 跳转目标由单独的信号计算
+wire [31:0] jalr_target = (in_rs1_data + in_imm) & 32'hFFFFFFFE;
+
+wire [31:0] branch_target = in_is_jalr ? jalr_target :      // JALR: rs1 + imm
+                            in_is_jal  ? (in_pc + in_imm) : // JAL: pc + imm
+                                         (in_pc + in_imm);  // Branch: pc + imm
+```
+
+**修复效果**：
+- microbench 所有测试通过（qsort, fib, sieve 等）
+- cpu-tests 全部通过（dummy, add, bubble-sort, fact, fib, load-store 等）
 
 ---
 
