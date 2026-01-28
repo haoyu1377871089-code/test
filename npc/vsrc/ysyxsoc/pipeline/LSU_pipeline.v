@@ -29,6 +29,7 @@ module LSU_pipeline (
     input         in_ebreak,
     input         in_ecall,
     input         in_mret,
+    input  [31:0] in_a0_data,      // a0 寄存器值 (用于 ebreak)
     
     // 下游接口 (to WBU)
     output reg    out_valid,
@@ -45,6 +46,7 @@ module LSU_pipeline (
     output        out_ebreak,
     output        out_ecall,
     output        out_mret,
+    output [31:0] out_a0_data,     // a0 寄存器值传递
     
     // 内存接口
     output reg    mem_req,
@@ -157,6 +159,7 @@ module LSU_pipeline (
     reg        is_ebreak_reg;
     reg        is_ecall_reg;
     reg        is_mret_reg;
+    reg [31:0] a0_data_reg;
     
     // 输出寄存器
     reg [31:0] result_reg;
@@ -200,6 +203,7 @@ module LSU_pipeline (
             is_ebreak_reg <= 1'b0;
             is_ecall_reg <= 1'b0;
             is_mret_reg <= 1'b0;
+            a0_data_reg <= 32'h0;
             result_reg <= 32'h0;
             mem_result <= 32'h0;
         end else if (flush) begin
@@ -235,6 +239,7 @@ module LSU_pipeline (
                         is_ebreak_reg <= in_ebreak;
                         is_ecall_reg <= in_ecall;
                         is_mret_reg <= in_mret;
+                        a0_data_reg <= in_a0_data;
                         
                         if (in_mem_ren || in_mem_wen) begin
                             // 需要访存
@@ -305,5 +310,6 @@ module LSU_pipeline (
     assign out_ebreak    = is_ebreak_reg;
     assign out_ecall     = is_ecall_reg;
     assign out_mret      = is_mret_reg;
+    assign out_a0_data   = a0_data_reg;
 
 endmodule

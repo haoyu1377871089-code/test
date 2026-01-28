@@ -37,6 +37,7 @@ module EXU_pipeline (
     input         in_is_system,
     input         in_is_fence,
     input         in_is_csr,
+    input  [31:0] in_a0_data,      // a0 寄存器值 (用于 ebreak)
     
     // 下游接口 (to EX/MEM 级间寄存器)
     output        out_valid,
@@ -66,6 +67,7 @@ module EXU_pipeline (
     output        out_ebreak,
     output        out_ecall,
     output        out_mret,
+    output [31:0] out_a0_data,     // a0 寄存器值传递
     
     // CSR 寄存器接口 (直接连接 CSR 模块)
     input  [31:0] csr_mtvec,
@@ -237,5 +239,6 @@ module EXU_pipeline (
     assign out_ebreak       = is_ebreak;
     assign out_ecall        = is_ecall;
     assign out_mret         = is_mret;
+    assign out_a0_data      = in_a0_data;  // 直接传递
 
 endmodule

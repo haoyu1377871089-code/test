@@ -13,7 +13,11 @@ module RegisterFile #(parameter ADDR_WIDTH = 5, parameter DATA_WIDTH = 32) (
   
   // 读取端口2
   input [ADDR_WIDTH-1:0] raddr2,
-  output [DATA_WIDTH-1:0] rdata2
+  output [DATA_WIDTH-1:0] rdata2,
+  
+  // 读取端口3 - 用于读取 a0 (x10) 作为 ebreak exit_code
+  input [ADDR_WIDTH-1:0] raddr3,
+  output [DATA_WIDTH-1:0] rdata3
   // 添加寄存器值输出接口用于DiffTest
   // output [DATA_WIDTH-1:0] reg_values [0:(2**ADDR_WIDTH)-1]
 );
@@ -40,6 +44,7 @@ module RegisterFile #(parameter ADDR_WIDTH = 5, parameter DATA_WIDTH = 32) (
   // 如果读取地址是0，直接返回0（R0通常为硬件零）
   assign rdata1 = (raddr1 == {ADDR_WIDTH{1'b0}}) ? {DATA_WIDTH{1'b0}} : rf[raddr1];
   assign rdata2 = (raddr2 == {ADDR_WIDTH{1'b0}}) ? {DATA_WIDTH{1'b0}} : rf[raddr2];
+  assign rdata3 = (raddr3 == {ADDR_WIDTH{1'b0}}) ? {DATA_WIDTH{1'b0}} : rf[raddr3];
   
   // 将内部寄存器值连接到输出接口
   genvar j;

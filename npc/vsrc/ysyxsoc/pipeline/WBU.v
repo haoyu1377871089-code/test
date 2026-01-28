@@ -25,6 +25,7 @@ module WBU (
     input         in_ebreak,
     input         in_ecall,
     input         in_mret,
+    input  [31:0] in_a0_data,      // a0 寄存器值 (用于 ebreak exit_code)
     
     // 寄存器文件写回接口
     output        rf_wen,
@@ -74,6 +75,7 @@ module WBU (
     reg        is_ebreak_reg;
     reg        is_ecall_reg;
     reg        is_mret_reg;
+    reg [31:0] a0_data_reg;
     
     // ========== 握手逻辑 ==========
     assign in_ready = (state == S_IDLE);
@@ -89,7 +91,7 @@ module WBU (
     
     // ========== ebreak ==========
     assign ebreak_flag = is_ebreak_reg && (state == S_COMMIT);
-    assign exit_code   = 32'h0;  // 正常退出
+    assign exit_code   = a0_data_reg;  // 使用 a0 寄存器的值作为退出码
     
     // ========== commit PC ==========
     assign commit_pc = pc_reg;
@@ -111,6 +113,7 @@ module WBU (
             is_ebreak_reg <= 1'b0;
             is_ecall_reg <= 1'b0;
             is_mret_reg <= 1'b0;
+            a0_data_reg <= 32'h0;
             
             // CSR 初始化
             csr_mtvec <= 32'h80000000;
@@ -144,6 +147,7 @@ module WBU (
                         is_ebreak_reg <= in_ebreak;
                         is_ecall_reg <= in_ecall;
                         is_mret_reg <= in_mret;
+                        a0_data_reg <= in_a0_data;
                         state <= S_COMMIT;
                     end
                 end

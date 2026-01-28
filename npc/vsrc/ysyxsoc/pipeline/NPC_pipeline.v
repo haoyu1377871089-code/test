@@ -94,6 +94,7 @@ module NPC_pipeline (
     wire        idu_out_is_system;
     wire        idu_out_is_fence;
     wire        idu_out_is_csr;
+    wire [31:0] idu_out_a0_data;
     
     // ID/EX 级间寄存器
     reg        id_ex_valid;
@@ -119,6 +120,7 @@ module NPC_pipeline (
     reg        id_ex_is_system;
     reg        id_ex_is_fence;
     reg        id_ex_is_csr;
+    reg [31:0] id_ex_a0_data;
     
     // ========== EX 阶段信号 ==========
     wire        exu_out_valid;
@@ -144,6 +146,7 @@ module NPC_pipeline (
     wire        exu_ebreak;
     wire        exu_ecall;
     wire        exu_mret;
+    wire [31:0] exu_out_a0_data;
     
     // EX/MEM 级间寄存器
     reg        ex_mem_valid;
@@ -164,6 +167,7 @@ module NPC_pipeline (
     reg        ex_mem_ebreak;
     reg        ex_mem_ecall;
     reg        ex_mem_mret;
+    reg [31:0] ex_mem_a0_data;
     
     // ========== MEM 阶段信号 ==========
     wire        lsu_out_valid;
@@ -180,6 +184,7 @@ module NPC_pipeline (
     wire        lsu_out_ebreak;
     wire        lsu_out_ecall;
     wire        lsu_out_mret;
+    wire [31:0] lsu_out_a0_data;
     
     // MEM/WB 级间寄存器
     reg        mem_wb_valid;
@@ -195,6 +200,7 @@ module NPC_pipeline (
     reg        mem_wb_ebreak;
     reg        mem_wb_ecall;
     reg        mem_wb_mret;
+    reg [31:0] mem_wb_a0_data;
     
     // 用于防止 MEM/WB 重复锁存同一条指令
     reg        mem_wb_latched;
@@ -454,6 +460,7 @@ module NPC_pipeline (
             id_ex_is_system <= 1'b0;
             id_ex_is_fence <= 1'b0;
             id_ex_is_csr <= 1'b0;
+            id_ex_a0_data <= 32'h0;
         end else if (flush_id) begin
             id_ex_valid <= 1'b0;
         end else if (!stall_ex) begin
@@ -484,6 +491,7 @@ module NPC_pipeline (
                 id_ex_is_system <= idu_out_is_system;
                 id_ex_is_fence <= idu_out_is_fence;
                 id_ex_is_csr <= idu_out_is_csr;
+                id_ex_a0_data <= idu_out_a0_data;
             end else begin
                 // ID 阶段被阻塞或无有效输出，插入气泡
                 // 注意：当 stall_id=1 时，ID/EX 中当前指令已经流向 EX/MEM
@@ -520,6 +528,7 @@ module NPC_pipeline (
             ex_mem_ebreak <= 1'b0;
             ex_mem_ecall <= 1'b0;
             ex_mem_mret <= 1'b0;
+            ex_mem_a0_data <= 32'h0;
         end else if (flush_ex) begin
             ex_mem_valid <= 1'b0;
         end else if (!stall_mem) begin
@@ -542,6 +551,7 @@ module NPC_pipeline (
                 ex_mem_ebreak <= exu_ebreak;
                 ex_mem_ecall <= exu_ecall;
                 ex_mem_mret <= exu_mret;
+                ex_mem_a0_data <= exu_out_a0_data;
             end else begin
                 ex_mem_valid <= 1'b0;
             end
@@ -571,6 +581,7 @@ module NPC_pipeline (
             mem_wb_ebreak <= 1'b0;
             mem_wb_ecall <= 1'b0;
             mem_wb_mret <= 1'b0;
+            mem_wb_a0_data <= 32'h0;
         end else begin
             // 当 WBU 接收了数据时，清除 valid
             if (mem_wb_valid && wbu_in_ready) begin
@@ -599,6 +610,7 @@ module NPC_pipeline (
                 mem_wb_ebreak <= lsu_out_ebreak;
                 mem_wb_ecall <= lsu_out_ecall;
                 mem_wb_mret <= lsu_out_mret;
+                mem_wb_a0_data <= lsu_out_a0_data;
             end
         end
     end
@@ -643,6 +655,7 @@ module NPC_pipeline (
         .out_is_system(idu_out_is_system),
         .out_is_fence(idu_out_is_fence),
         .out_is_csr  (idu_out_is_csr),
+        .out_a0_data (idu_out_a0_data),
         .rf_wen      (wbu_rf_wen),
         .rf_waddr    (wbu_rf_waddr),
         .rf_wdata    (wbu_rf_wdata),
@@ -677,6 +690,7 @@ module NPC_pipeline (
         .in_is_system(id_ex_is_system),
         .in_is_fence (id_ex_is_fence),
         .in_is_csr   (id_ex_is_csr),
+        .in_a0_data  (id_ex_a0_data),
         .out_valid   (exu_out_valid),
         .out_ready   (1'b1),  // MEM 阶段总是准备接收
         .out_pc      (exu_out_pc),
@@ -700,6 +714,7 @@ module NPC_pipeline (
         .out_ebreak  (exu_ebreak),
         .out_ecall   (exu_ecall),
         .out_mret    (exu_mret),
+        .out_a0_data (exu_out_a0_data),
         .csr_mtvec   (wbu_csr_mtvec),
         .csr_mepc    (wbu_csr_mepc),
         .csr_mcause  (wbu_csr_mcause),
@@ -730,6 +745,7 @@ module NPC_pipeline (
         .in_ebreak   (ex_mem_ebreak),
         .in_ecall    (ex_mem_ecall),
         .in_mret     (ex_mem_mret),
+        .in_a0_data  (ex_mem_a0_data),
         .out_valid   (lsu_out_valid),
         .out_ready   (!mem_wb_valid),  // MEM/WB 空闲时可以接收
         .out_pc      (lsu_out_pc),
@@ -744,6 +760,7 @@ module NPC_pipeline (
         .out_ebreak  (lsu_out_ebreak),
         .out_ecall   (lsu_out_ecall),
         .out_mret    (lsu_out_mret),
+        .out_a0_data (lsu_out_a0_data),
         .mem_req     (lsu_req),
         .mem_wen     (lsu_wen),
         .mem_addr    (lsu_addr),
@@ -772,6 +789,7 @@ module NPC_pipeline (
         .in_ebreak   (mem_wb_ebreak),
         .in_ecall    (mem_wb_ecall),
         .in_mret     (mem_wb_mret),
+        .in_a0_data  (mem_wb_a0_data),
         .rf_wen      (wbu_rf_wen),
         .rf_waddr    (wbu_rf_waddr),
         .rf_wdata    (wbu_rf_wdata),

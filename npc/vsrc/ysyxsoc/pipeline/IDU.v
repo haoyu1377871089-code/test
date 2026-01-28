@@ -46,6 +46,9 @@ module IDU (
     output        out_is_fence,     // 是否为 FENCE/FENCE.I
     output        out_is_csr,       // 是否为 CSR 指令
     
+    // a0 寄存器值 (用于 ebreak exit_code)
+    output [31:0] out_a0_data,
+    
     // 寄存器文件写回接口 (from WBU)
     input         rf_wen,
     input  [4:0]  rf_waddr,
@@ -112,6 +115,7 @@ module IDU (
     // ========== 寄存器文件 ==========
     wire [31:0] rs1_data;
     wire [31:0] rs2_data;
+    wire [31:0] a0_data;  // a0 (x10) 寄存器值，用于 ebreak exit_code
     
     RegisterFile #(.ADDR_WIDTH(5), .DATA_WIDTH(32)) u_regfile (
         .clk    (clk),
@@ -122,7 +126,9 @@ module IDU (
         .raddr1 (rs1),
         .rdata1 (rs1_data),
         .raddr2 (rs2),
-        .rdata2 (rs2_data)
+        .rdata2 (rs2_data),
+        .raddr3 (5'd10),   // 始终读取 x10 (a0)
+        .rdata3 (a0_data)
     );
     
     // ========== 控制信号生成 ==========
@@ -159,5 +165,6 @@ module IDU (
     assign out_is_system= is_system;
     assign out_is_fence = is_fence;
     assign out_is_csr   = is_csr;
+    assign out_a0_data  = a0_data;  // 传递 a0 寄存器值
 
 endmodule
