@@ -1,127 +1,143 @@
-# NPC 架构规划与重构指南
+# NPC Verilog 源代码目录
 
-## 当前状态
-- ✅ 基本功能完整的单周期处理器
-- ✅ 支持RISC-V基本指令集
-- ✅ 通过am-tests验证
-- ✅ 初步模块化（InstructionDecoder分离）
+本目录包含 NPC (New Processor Core) 的 Verilog 源代码，分为两个独立配置。
 
-## 架构演进规划
+## 目录结构
 
-### 阶段1：当前状态 - 单体设计
 ```
-top.v
-├── IFU逻辑 (内嵌在top.v中)
-├── EXU.v (包含所有执行逻辑)
-│   ├── 指令译码 (IDU功能)
-│   ├── 算术逻辑 (ALU功能)
-│   ├── 分支控制 (BRU功能)
-│   ├── 访存控制 (LSU功能)
-│   └── CSR管理 (CSR功能)
-├── MEM.v (内存模块)
-└── RegisterFile.v (寄存器文件)
-```
-
-### 阶段2：模块化分离 (为总线接口准备)
-```
-top.v
-├── core/
-│   ├── IFU.v (指令获取单元)
-│   ├── IDU.v (指令译码单元)
-│   ├── EXU.v (执行单元，简化)
-│   ├── LSU.v (访存单元)
-│   └── CSR.v (控制状态寄存器)
-├── bus/
-│   ├── AXI4_Lite_Master.v (AXI4-Lite主设备接口)
-│   └── BusArbiter.v (总线仲裁器)
-├── utils/
-│   ├── InstructionDecoder.v
-│   ├── ALU.v
-│   ├── BranchUnit.v
-│   ├── RegisterFile.v
-│   └── PerformanceCounters.v
-└── MEM.v
+vsrc/
+├── npc_soc/              # 独立仿真配置 (使用内部 SRAM/UART/CLINT)
+│   ├── npc_soc_top.v     # 顶层模块 (module top)
+│   ├── EXU.v             # 执行单元
+│   ├── RegisterFile.v    # 寄存器文件
+│   ├── IFU_SRAM.v        # 取指单元 (AXI4-Lite Master)
+│   ├── LSU_SRAM.v        # 访存单元 (AXI4-Lite Master)
+│   ├── AXI4_Lite_Arbiter.v # AXI4-Lite 仲裁器
+│   ├── AXI4_Lite_Xbar.v  # AXI4-Lite 交叉开关
+│   ├── AXI4_Lite_SRAM.v  # SRAM 从设备
+│   ├── AXI4_Lite_UART.v  # UART 从设备
+│   ├── AXI4_Lite_CLINT.v # CLINT 从设备
+│   └── MEM.v             # 内存模块
+│
+├── ysyxsoc/              # ysyxSoC 配置 (使用外部 AXI4 总线)
+│   ├── ysyx_00000000.v   # 顶层模块 (NPC Core)
+│   ├── EXU.v             # 执行单元
+│   ├── RegisterFile.v    # 寄存器文件
+│   ├── ICache.v          # 指令缓存 (4KB, 2-way, 16B line)
+│   ├── DCache.v          # 数据缓存 (4KB, 2-way, 16B line, write-through)
+│   ├── IFU_AXI4.v        # 取指单元 (AXI4 Burst Master)
+│   ├── LSU_AXI4.v        # 访存单元 (AXI4 Master, 支持 Burst)
+│   └── AXI4_Arbiter.v    # AXI4 仲裁器 (支持 Burst)
+│
+└── README.md
 ```
 
-### 阶段3：总线接口集成 (B1阶段)
-- 实现AXI4-Lite总线协议
-- 支持valid/ready握手机制
-- 为SoC集成做准备
+## 配置说明
 
-### 阶段4：SoC集成 (B2阶段)
-- 接入ysyxSoC环境
-- 支持多种外设访问
-- 地址空间管理
+### npc_soc/ - 独立仿真配置
 
-### 阶段5：性能优化 (B3阶段)
-- 添加指令缓存 (ICache)
-- 添加数据缓存 (DCache)
-- 性能计数器和分析
+用于不依赖 ysyxSoC 的独立仿真和测试。
 
-### 阶段6：流水线实现 (B4阶段)
-- 五级流水线设计
-- 冲突检测和转发
-- 分支预测
+**特点：**
+- 内置 SRAM、UART、CLINT 外设
+- 使用 AXI4-Lite 总线协议
+- 适合单元测试和快速验证
 
-## 重构原则
-
-### 1. 渐进式重构
-- 每次只改变一个模块
-- 每次重构后都要验证功能
-- 保持向后兼容性
-
-### 2. 接口标准化
-- 使用valid/ready握手协议
-- 统一的总线接口规范
-- 参数化设计
-
-### 3. 可测试性
-- 保持DiffTest接口
-- 添加性能监控接口
-- 支持波形调试
-
-## 验证方法
-
-### 基本功能验证
+**编译方式：**
 ```bash
-cd /home/hy258/ysyx-workbench/am-kernels/tests/am-tests
-make ARCH=riscv32e-npc run
+cd npc
+make         # 使用 Makefile (独立仿真)
 ```
 
-### 性能测试
+### ysyxsoc/ - ysyxSoC 配置
+
+用于集成到 ysyxSoC 系统中，连接真实外设。
+
+**特点：**
+- 使用 AXI4 总线协议 (支持 Burst)
+- 包含 I-Cache (4KB, 2-way, 16B cache line)
+- 包含 D-Cache (4KB, 2-way, 16B cache line, write-through)
+- 连接 ysyxSoC 的 SDRAM、Flash、UART 等外设
+
+**编译方式：**
 ```bash
-cd /home/hy258/ysyx-workbench/am-kernels/tests/cpu-tests
-make ARCH=riscv32e-npc ALL=dummy run
+cd npc
+make -f Makefile.soc   # 使用 Makefile.soc (ysyxSoC)
 ```
 
-## 目录结构说明
+## 已删除的废弃文件
 
-### 当前文件组织
-- `top.v` - 顶层模块
-- `EXU.v` - 执行单元（包含所有执行逻辑）
-- `InstructionDecoder.v` - 指令解码器
-- `MEM.v` - 内存模块
-- `RegisterFile.v` - 寄存器文件
-- `flip.v` - 触发器模板
-- `mux.v` - 选择器模板
+以下文件已被删除，因为两种配置都不再使用：
 
-### 预留目录结构
-- `core/` - 处理器核心模块
-- `bus/` - 总线接口模块
-- `utils/` - 通用工具模块
-- `cache/` - 缓存相关模块
+| 文件 | 说明 |
+|------|------|
+| `IFU_AXI.v` | 旧的 AXI4-Lite IFU，已被 IFU_AXI4.v 替代 |
+| `LSU_AXI.v` | 旧的 AXI4-Lite LSU，已被 LSU_AXI4.v 替代 |
+| `AXI4_Lite_to_AXI4_Bridge.v` | 旧的协议桥接，已不需要 |
 
-## 下一步计划
+## 模块说明
 
-1. **保持当前功能稳定**：确保所有测试通过
-2. **逐步模块分离**：按需要分离EXU中的子功能
-3. **添加总线接口**：为SoC集成做准备
-4. **性能监控**：添加计数器和分析工具
-5. **流水线准备**：设计流水线寄存器和控制逻辑
+### 共享模块 (两个配置各有一份副本)
 
-## 注意事项
+| 模块 | 说明 |
+|------|------|
+| `EXU.v` | 执行单元，包含 ALU、分支判断、CSR |
+| `RegisterFile.v` | 参数化寄存器文件 |
 
-- 每次重构都要通过验证测试
-- 保持代码的可读性和可维护性
-- 为后续扩展预留接口
-- 遵循RISC-V规范和ysyx项目要求
+### ysyxsoc 专用模块
+
+| 模块 | 说明 |
+|------|------|
+| `ysyx_00000000.v` | NPC 核心顶层，AXI4 Master 接口 |
+| `ICache.v` | 2-way 组相联 I-Cache，支持 Burst refill |
+| `DCache.v` | 2-way 组相联 D-Cache，write-through + no-write-allocate |
+| `IFU_AXI4.v` | AXI4 Master，支持 4-beat burst |
+| `LSU_AXI4.v` | AXI4 Master，支持单拍和 burst 读写 |
+| `AXI4_Arbiter.v` | AXI4 仲裁器，IFU 优先 |
+
+### npc_soc 专用模块
+
+| 模块 | 说明 |
+|------|------|
+| `npc_soc_top.v` | 独立仿真顶层 |
+| `IFU_SRAM.v` | AXI4-Lite Master IFU |
+| `LSU_SRAM.v` | AXI4-Lite Master LSU |
+| `AXI4_Lite_Arbiter.v` | AXI4-Lite 仲裁器 |
+| `AXI4_Lite_Xbar.v` | 地址译码交叉开关 |
+| `AXI4_Lite_SRAM.v` | SRAM 从设备 |
+| `AXI4_Lite_UART.v` | UART 从设备 |
+| `AXI4_Lite_CLINT.v` | CLINT 从设备 |
+| `MEM.v` | 底层内存模块 |
+
+## 性能参数 (ysyxsoc 配置)
+
+### I-Cache
+
+| 参数 | 值 |
+|------|-----|
+| I-Cache 大小 | 4 KB |
+| I-Cache 关联度 | 2-way |
+| Cache Line 大小 | 16 Bytes |
+| AXI4 Burst 长度 | 4-beat (16 Bytes) |
+| Hit Rate (microbench) | 99.67% |
+| AMAT | 11.65 cycles |
+
+### D-Cache
+
+| 参数 | 值 |
+|------|-----|
+| D-Cache 大小 | 4 KB |
+| D-Cache 关联度 | 2-way |
+| Cache Line 大小 | 16 Bytes |
+| 写策略 | Write-through + No-write-allocate |
+| AXI4 Burst 长度 | 4-beat (16 Bytes) for refill |
+
+## 编译选项
+
+在 `Makefile.soc` 中可以通过 `+define+` 控制功能：
+
+| 选项 | 说明 |
+|------|------|
+| `SIMULATION` | 启用仿真专用功能（性能计数器等） |
+| `ENABLE_ICACHE` | 启用 I-Cache |
+| `ENABLE_DCACHE` | 启用 D-Cache |

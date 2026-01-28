@@ -74,12 +74,25 @@ int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     Verilated::traceEverOn(true);
 
-    if (argc < 2) {
-        std::cout << "Usage: " << argv[0] << " <image>" << std::endl;
+    // Parse command line arguments
+    bool no_gui = false;
+    const char* imgPath = nullptr;
+    
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-n") == 0 || strcmp(argv[i], "--no-gui") == 0) {
+            no_gui = true;
+        } else if (argv[i][0] != '-') {
+            imgPath = argv[i];
+        }
+    }
+
+    if (imgPath == nullptr) {
+        std::cout << "Usage: " << argv[0] << " [options] <image>" << std::endl;
         std::cout << "  image: binary to load into Flash at 0x30000000" << std::endl;
+        std::cout << "Options:" << std::endl;
+        std::cout << "  -n, --no-gui    Disable NVBoard GUI window" << std::endl;
         return 0;
     }
-    const char* imgPath = argv[1];
 
     // Disable auto-exit after frames (0 means run forever)
     npc_set_exit_after_frames(0);
@@ -97,13 +110,15 @@ int main(int argc, char **argv) {
     top->trace(tfp, 99);
     tfp->open("build_soc/trace.vcd");
 
-    // Initialize NVBoard
-    nvboard_bind_all_pins(top);
-    nvboard_init();
-    
-    // Disable NVBoard's UART sampling to prevent duplicate character output
-    // We use our own uart_tick() for stdout output
-    uart_divisor_cnt = 32767;  // Set to max int16_t to effectively disable
+    // Initialize NVBoard (unless --no-gui)
+    if (!no_gui) {
+        nvboard_bind_all_pins(top);
+        nvboard_init();
+        
+        // Disable NVBoard's UART sampling to prevent duplicate character output
+        // We use our own uart_tick() for stdout output
+        uart_divisor_cnt = 32767;  // Set to max int16_t to effectively disable
+    }
 
     top->reset = 1;
     top->clock = 0;
@@ -149,7 +164,9 @@ int main(int argc, char **argv) {
               << ", request_exit=" << npc_request_exit() 
               << ", uart_chars=" << uart_char_count << std::endl;
 
-    nvboard_quit();
+    if (!no_gui) {
+        nvboard_quit();
+    }
     tfp->close();
     delete top;
     return 0;

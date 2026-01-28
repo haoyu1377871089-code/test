@@ -8,6 +8,9 @@ module sdram_top_axi(
   input  [7:0]  in_awlen,
   input  [2:0]  in_awsize,
   input  [1:0]  in_awburst,
+  input         in_awlock,    // Unused but required for interface compatibility
+  input  [3:0]  in_awcache,   // Unused but required for interface compatibility
+  input  [2:0]  in_awprot,    // Unused but required for interface compatibility
   output        in_wready,
   input         in_wvalid,
   input  [31:0] in_wdata,
@@ -24,6 +27,9 @@ module sdram_top_axi(
   input  [7:0]  in_arlen,
   input  [2:0]  in_arsize,
   input  [1:0]  in_arburst,
+  input         in_arlock,    // Unused but required for interface compatibility
+  input  [3:0]  in_arcache,   // Unused but required for interface compatibility
+  input  [2:0]  in_arprot,    // Unused but required for interface compatibility
   input         in_rready,
   output        in_rvalid,
   output [1:0]  in_rresp,

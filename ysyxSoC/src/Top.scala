@@ -7,7 +7,7 @@ import freechips.rocketchip.diplomacy.LazyModule
 
 object Config {
   def hasChipLink: Boolean = false
-  def sdramUseAXI: Boolean = false
+  def sdramUseAXI: Boolean = true   // Changed to AXI interface for burst support
 }
 
 class ysyxSoCTop extends Module {

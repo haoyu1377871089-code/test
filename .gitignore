@@ -44,3 +44,8 @@ npc_backup_*/
 # Specific generated files
 tags
 cscope.out
+
+# Toolchain archives (too large for git)
+tools/*.tar.gz
+tools/*.tar
+tools/*.zip
