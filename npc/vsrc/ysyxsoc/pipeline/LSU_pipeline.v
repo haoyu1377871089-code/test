@@ -181,6 +181,11 @@ module LSU_pipeline (
         end else begin
             case (state)
                 S_IDLE: begin
+                    // 修复: 当数据被下游消费时立即清除 out_valid
+                    if (out_valid && out_ready) begin
+                        out_valid <= 1'b0;
+                    end
+                    
                     if (in_valid && in_ready) begin
                         // 锁存输入
                         pc_reg <= in_pc;
@@ -216,8 +221,6 @@ module LSU_pipeline (
                                 result_reg <= in_alu_result;
                             out_valid <= 1'b1;
                         end
-                    end else if (out_ready) begin
-                        out_valid <= 1'b0;
                     end
                 end
                 

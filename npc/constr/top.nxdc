@@ -1,0 +1,5 @@
+top=ysyxSoCFull
+
+# UART pins
+externalPins_uart_tx UART_TX
+externalPins_uart_rx UART_RX

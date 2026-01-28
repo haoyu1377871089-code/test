@@ -210,6 +210,7 @@ module NPC_pipeline (
     wire [31:0] wbu_exit_code;
     wire        wbu_inst_commit;
     wire [31:0] wbu_commit_pc;
+    wire        wbu_in_ready;  // WBU 是否准备接收新数据
     
     // ========== 冒险检测和暂停逻辑 ==========
     
@@ -280,7 +281,11 @@ module NPC_pipeline (
     
     // IF 阶段状态机
     // if_discard: 当 flush 发生时，如果 ICache 正在处理请求，需要等待它返回并丢弃数据
+    // if_pending_*: 当取指完成但 IF/ID 被阻塞时，缓存取指结果
     reg if_discard;
+    reg        if_pending_valid;  // 是否有等待写入 IF/ID 的数据
+    reg [31:0] if_pending_pc;
+    reg [31:0] if_pending_inst;
     
     always @(posedge clk or posedge rst) begin
         if (rst) begin
@@ -291,6 +296,9 @@ module NPC_pipeline (
             if_id_pc <= 32'h0;
             if_id_inst <= 32'h0;
             if_id_valid <= 1'b0;
+            if_pending_valid <= 1'b0;
+            if_pending_pc <= 32'h0;
+            if_pending_inst <= 32'h0;
         end else begin
             // 默认清除请求
             ifu_req <= 1'b0;
@@ -298,6 +306,7 @@ module NPC_pipeline (
             // 冲刷处理
             if (flush_if) begin
                 if_id_valid <= 1'b0;
+                if_pending_valid <= 1'b0;  // 也清除 pending 数据
                 pc <= next_pc;
                 // 直接丢弃正在进行的取指，不等待 ICache 返回
                 // 这可能会导致 ICache 的一次 refill 被浪费，但不会影响正确性
@@ -312,23 +321,42 @@ module NPC_pipeline (
                     if_waiting <= 1'b0;
                     // 丢弃数据，不写入 if_id
                 end
-                // IF/ID 被消费时清除 valid
-                else if (if_id_consumed) begin
+                
+                // 优先处理 pending 数据：将 pending 数据写入 IF/ID
+                if (if_pending_valid && (!if_id_valid || if_id_consumed)) begin
+                    if_id_pc <= if_pending_pc;
+                    if_id_inst <= if_pending_inst;
+                    if_id_valid <= 1'b1;
+                    if_pending_valid <= 1'b0;
+                end
+                // IF/ID 被消费时清除 valid（如果没有 pending 数据）
+                else if (if_id_consumed && !if_pending_valid) begin
                     if_id_valid <= 1'b0;
                 end
                 
-                // 取指完成时写入 IF/ID（正常情况，非 discard）
+                // 取指完成时处理（正常情况，非 discard）
                 if (if_waiting && !if_discard && ifu_rvalid) begin
-                    if_id_pc <= pc;
-                    if_id_inst <= ifu_rdata;
-                    if_id_valid <= 1'b1;
                     if_waiting <= 1'b0;
-                    pc <= pc + 32'd4;
+                    
+                    // 修复问题 #5: 检查 IF/ID 是否可以接收数据
+                    if (!if_id_valid || if_id_consumed) begin
+                        // IF/ID 可以接收，直接写入
+                        if_id_pc <= pc;
+                        if_id_inst <= ifu_rdata;
+                        if_id_valid <= 1'b1;
+                        pc <= pc + 32'd4;
+                    end else begin
+                        // IF/ID 被阻塞，先存入 pending 寄存器
+                        if_pending_pc <= pc;
+                        if_pending_inst <= ifu_rdata;
+                        if_pending_valid <= 1'b1;
+                        pc <= pc + 32'd4;
+                    end
                 end
                 
                 // 取指请求逻辑（脉冲请求，只维持一个周期）
-                // 只有当不在等待且不需要丢弃数据时才能发起新请求
-                if (!stall_if && !if_waiting && !if_discard) begin
+                // 只有当不在等待且不需要丢弃数据且没有 pending 数据时才能发起新请求
+                if (!stall_if && !if_waiting && !if_discard && !if_pending_valid) begin
                     // 需要发起新请求的条件：IF/ID 为空 或 IF/ID 正在被消费
                     if (!if_id_valid || if_id_consumed) begin
                         ifu_req <= 1'b1;
@@ -464,6 +492,7 @@ module NPC_pipeline (
     wire lsu_in_valid = ex_mem_valid;
     
     // MEM/WB 级间寄存器更新
+    // 修复问题 #4: 只有当 WBU 准备好时才更新，避免重复提交
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             mem_wb_valid <= 1'b0;
@@ -480,23 +509,27 @@ module NPC_pipeline (
             mem_wb_ecall <= 1'b0;
             mem_wb_mret <= 1'b0;
         end else begin
-            if (lsu_out_valid) begin
-                mem_wb_valid <= 1'b1;
-                mem_wb_pc <= lsu_out_pc;
-                mem_wb_inst <= lsu_out_inst;
-                mem_wb_result <= lsu_out_result;
-                mem_wb_rd <= lsu_out_rd;
-                mem_wb_reg_wen <= lsu_out_reg_wen;
-                mem_wb_is_csr <= lsu_out_is_csr;
-                mem_wb_csr_wdata <= lsu_out_csr_wdata;
-                mem_wb_csr_wen <= lsu_out_csr_wen;
-                mem_wb_csr_addr <= lsu_out_csr_addr;
-                mem_wb_ebreak <= lsu_out_ebreak;
-                mem_wb_ecall <= lsu_out_ecall;
-                mem_wb_mret <= lsu_out_mret;
-            end else begin
-                mem_wb_valid <= 1'b0;
+            // 只有当 WBU 准备好接收时才更新 MEM/WB 寄存器
+            if (wbu_in_ready) begin
+                if (lsu_out_valid) begin
+                    mem_wb_valid <= 1'b1;
+                    mem_wb_pc <= lsu_out_pc;
+                    mem_wb_inst <= lsu_out_inst;
+                    mem_wb_result <= lsu_out_result;
+                    mem_wb_rd <= lsu_out_rd;
+                    mem_wb_reg_wen <= lsu_out_reg_wen;
+                    mem_wb_is_csr <= lsu_out_is_csr;
+                    mem_wb_csr_wdata <= lsu_out_csr_wdata;
+                    mem_wb_csr_wen <= lsu_out_csr_wen;
+                    mem_wb_csr_addr <= lsu_out_csr_addr;
+                    mem_wb_ebreak <= lsu_out_ebreak;
+                    mem_wb_ecall <= lsu_out_ecall;
+                    mem_wb_mret <= lsu_out_mret;
+                end else begin
+                    mem_wb_valid <= 1'b0;
+                end
             end
+            // 如果 WBU 不准备好，保持当前状态
         end
     end
     
@@ -627,7 +660,7 @@ module NPC_pipeline (
         .in_ecall    (ex_mem_ecall),
         .in_mret     (ex_mem_mret),
         .out_valid   (lsu_out_valid),
-        .out_ready   (1'b1),  // WB 阶段总是准备接收
+        .out_ready   (wbu_in_ready),  // 修复: 使用 WBU 的 ready 信号
         .out_pc      (lsu_out_pc),
         .out_inst    (lsu_out_inst),
         .out_result  (lsu_out_result),
@@ -655,7 +688,7 @@ module NPC_pipeline (
         .clk         (clk),
         .rst         (rst),
         .in_valid    (wbu_in_valid),
-        .in_ready    (),
+        .in_ready    (wbu_in_ready),
         .in_pc       (mem_wb_pc),
         .in_inst     (mem_wb_inst),
         .in_result   (mem_wb_result),
