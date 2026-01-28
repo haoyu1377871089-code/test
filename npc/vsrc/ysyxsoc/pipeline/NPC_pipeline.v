@@ -216,8 +216,15 @@ module NPC_pipeline (
     // 结构冒险: MEM 阶段访存时需要暂停
     wire mem_busy = ex_mem_valid && (ex_mem_mem_ren || ex_mem_mem_wen) && !lsu_out_valid;
     
-    // ========== RAW 数据冒险检测 ==========
-    // 检测 ID 阶段源寄存器与后续阶段目标寄存器的冲突
+    // ========== RAW 数据冒险检测与数据转发 ==========
+    // 数据转发策略:
+    // 1. EX-to-EX: 从 EX/MEM 级间寄存器转发 ALU 结果（非 load 指令）
+    // 2. MEM-to-EX: 从 MEM/WB 级间寄存器转发结果
+    // 3. WB-to-EX: 从 WBU 写回数据转发
+    // 
+    // 仍需暂停的情况:
+    // - Load-use hazard: load 指令在 MEM 阶段，后续指令需要其结果
+    //   （因为 load 数据要等内存返回才可用）
     
     // ID 阶段的源寄存器（来自 IDU 输出）
     wire [4:0] id_rs1 = idu_out_rs1;
@@ -225,37 +232,101 @@ module NPC_pipeline (
     wire id_uses_rs1 = idu_out_valid && (id_rs1 != 5'b0);  // x0 不需要检测
     wire id_uses_rs2 = idu_out_valid && (id_rs2 != 5'b0);
     
-    // EX 阶段的目标寄存器
+    // EX 阶段的目标寄存器（ID/EX 级间寄存器）
     wire [4:0] ex_rd = id_ex_rd;
     wire ex_writes_reg = id_ex_valid && id_ex_reg_wen && (ex_rd != 5'b0);
+    wire ex_is_load = id_ex_valid && id_ex_mem_ren;  // EX 阶段是 load 指令
     
-    // MEM 阶段的目标寄存器
+    // MEM 阶段的目标寄存器（EX/MEM 级间寄存器）
     wire [4:0] mem_rd = ex_mem_rd;
     wire mem_writes_reg = ex_mem_valid && ex_mem_reg_wen && (mem_rd != 5'b0);
+    wire mem_is_load = ex_mem_valid && ex_mem_mem_ren;  // MEM 阶段是 load 指令
     
     // WB 阶段的目标寄存器（MEM/WB 寄存器中的数据）
-    // 注意：WBU 是两周期操作，需要同时检测 MEM/WB 和 WBU 正在写入的情况
     wire [4:0] wb_rd = mem_wb_rd;
     wire wb_writes_reg = mem_wb_valid && mem_wb_reg_wen && (wb_rd != 5'b0);
     
     // WBU 正在写入的寄存器（当 WBU 在 S_COMMIT 状态时）
-    // wbu_rf_wen 是组合逻辑，在 S_COMMIT 状态时为高
     wire [4:0] wbu_rd = wbu_rf_waddr;
     wire wbu_writes_reg = wbu_rf_wen && (wbu_rd != 5'b0);
     
-    // RAW 冒险检测
-    wire raw_ex_rs1 = id_uses_rs1 && ex_writes_reg && (id_rs1 == ex_rd);
-    wire raw_ex_rs2 = id_uses_rs2 && ex_writes_reg && (id_rs2 == ex_rd);
-    wire raw_mem_rs1 = id_uses_rs1 && mem_writes_reg && (id_rs1 == mem_rd);
-    wire raw_mem_rs2 = id_uses_rs2 && mem_writes_reg && (id_rs2 == mem_rd);
-    wire raw_wb_rs1 = id_uses_rs1 && wb_writes_reg && (id_rs1 == wb_rd);
-    wire raw_wb_rs2 = id_uses_rs2 && wb_writes_reg && (id_rs2 == wb_rd);
-    // 检测 WBU 正在写入的情况（关键：修复两周期 WBU 的时序问题）
-    wire raw_wbu_rs1 = id_uses_rs1 && wbu_writes_reg && (id_rs1 == wbu_rd);
-    wire raw_wbu_rs2 = id_uses_rs2 && wbu_writes_reg && (id_rs2 == wbu_rd);
+    // ========== 转发检测信号 ==========
+    // 检测是否需要从各阶段转发数据
+    // 
+    // 转发优先级（数据越新越优先）：MEM > WB > WBU > 寄存器文件
+    // 
+    // 注意：EX 阶段（ID/EX 寄存器）的指令结果在当前周期末才会存入 EX/MEM，
+    //       所以无法直接转发，需要暂停一个周期。
     
-    wire raw_hazard = raw_ex_rs1 || raw_ex_rs2 || raw_mem_rs1 || raw_mem_rs2 || 
-                      raw_wb_rs1 || raw_wb_rs2 || raw_wbu_rs1 || raw_wbu_rs2;
+    // MEM -> ID 转发检测 (EX/MEM 寄存器中的数据)
+    // 对于非 load 指令，ALU 结果直接可用
+    // 对于 load 指令，如果已经完成（lsu_out_valid），数据也可转发
+    wire mem_data_ready = ex_mem_valid && (!mem_is_load || lsu_out_valid);
+    wire fwd_mem_rs1 = id_uses_rs1 && mem_writes_reg && mem_data_ready && (id_rs1 == mem_rd);
+    wire fwd_mem_rs2 = id_uses_rs2 && mem_writes_reg && mem_data_ready && (id_rs2 == mem_rd);
+    
+    // WB -> ID 转发检测 (MEM/WB 级间寄存器中的数据)
+    wire fwd_wb_rs1 = id_uses_rs1 && wb_writes_reg && 
+                      !fwd_mem_rs1 && (id_rs1 == wb_rd);
+    wire fwd_wb_rs2 = id_uses_rs2 && wb_writes_reg && 
+                      !fwd_mem_rs2 && (id_rs2 == wb_rd);
+    
+    // WBU -> ID 转发检测 (WBU 正在写回寄存器文件的数据)
+    wire fwd_wbu_rs1 = id_uses_rs1 && wbu_writes_reg && 
+                       !fwd_mem_rs1 && !fwd_wb_rs1 && (id_rs1 == wbu_rd);
+    wire fwd_wbu_rs2 = id_uses_rs2 && wbu_writes_reg && 
+                       !fwd_mem_rs2 && !fwd_wb_rs2 && (id_rs2 == wbu_rd);
+    
+    // ========== 转发数据选择 ==========
+    // 根据转发优先级选择转发数据
+    
+    // MEM 阶段的转发数据 (来自 EX/MEM 级间寄存器)
+    // 对于 load 指令，使用 LSU 的输出结果
+    wire [31:0] mem_fwd_data = mem_is_load ? lsu_out_result : ex_mem_alu_result;
+    
+    // WB 阶段的转发数据 (来自 MEM/WB 级间寄存器)
+    wire [31:0] wb_fwd_data = mem_wb_result;
+    
+    // WBU 阶段的转发数据 (WBU 正在写回的数据)
+    wire [31:0] wbu_fwd_data = wbu_rf_wdata;
+    
+    // RS1 转发数据选择（优先级：MEM > WB > WBU > 寄存器文件）
+    wire [31:0] rs1_fwd_data = fwd_mem_rs1 ? mem_fwd_data :
+                               fwd_wb_rs1  ? wb_fwd_data  :
+                               fwd_wbu_rs1 ? wbu_fwd_data :
+                               idu_out_rs1_data;
+    
+    // RS2 转发数据选择
+    wire [31:0] rs2_fwd_data = fwd_mem_rs2 ? mem_fwd_data :
+                               fwd_wb_rs2  ? wb_fwd_data  :
+                               fwd_wbu_rs2 ? wbu_fwd_data :
+                               idu_out_rs2_data;
+    
+    // ========== RAW 冒险检测（需要暂停的情况）==========
+    // 
+    // 1. EX 阶段冒险：ID 阶段依赖 EX 阶段（ID/EX 寄存器）的指令
+    //    由于 EXU 是组合逻辑，其结果在当前周期末才会存入 EX/MEM，
+    //    所以需要暂停一个周期，等数据存入 EX/MEM 后才能转发。
+    //
+    // 2. Load-use hazard：load 指令在 EX 阶段，后续指令依赖其结果
+    //    load 需要两个周期才能得到数据（EX + MEM），需要暂停一个周期。
+    //
+    // 3. MEM 阶段 load 未完成：load 指令在 MEM 阶段且正在访存
+    //    需要等待 LSU 返回数据才能转发。
+    
+    // EX 阶段的 RAW 冒险（非 load 指令也需要暂停一个周期）
+    wire ex_raw_hazard_rs1 = id_uses_rs1 && ex_writes_reg && (id_rs1 == ex_rd);
+    wire ex_raw_hazard_rs2 = id_uses_rs2 && ex_writes_reg && (id_rs2 == ex_rd);
+    wire ex_raw_hazard = ex_raw_hazard_rs1 || ex_raw_hazard_rs2;
+    
+    // MEM 阶段 load 正在进行时的冒险检测
+    // 当 MEM 阶段有 load 且还未完成（mem_busy）时，需要暂停
+    wire mem_load_hazard_rs1 = id_uses_rs1 && mem_is_load && mem_busy && (id_rs1 == mem_rd);
+    wire mem_load_hazard_rs2 = id_uses_rs2 && mem_is_load && mem_busy && (id_rs2 == mem_rd);
+    wire mem_load_hazard = mem_load_hazard_rs1 || mem_load_hazard_rs2;
+    
+    // 综合 RAW 冒险（只有无法转发的情况才暂停）
+    wire raw_hazard = ex_raw_hazard || mem_load_hazard;
     
     // 暂停信号
     // stall_if: IF 阶段只在 MEM busy 或下游阻塞时暂停
@@ -387,8 +458,9 @@ module NPC_pipeline (
                 id_ex_valid <= 1'b1;
                 id_ex_pc <= idu_out_pc;
                 id_ex_inst <= idu_out_inst;
-                id_ex_rs1_data <= idu_out_rs1_data;
-                id_ex_rs2_data <= idu_out_rs2_data;
+                // 使用转发后的数据
+                id_ex_rs1_data <= rs1_fwd_data;
+                id_ex_rs2_data <= rs2_fwd_data;
                 id_ex_imm <= idu_out_imm;
                 id_ex_rd <= idu_out_rd;
                 id_ex_rs1 <= idu_out_rs1;
