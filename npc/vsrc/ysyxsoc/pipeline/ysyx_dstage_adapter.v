@@ -113,8 +113,13 @@ module ysyx_00000000 (
     // 地址计算
     assign io_ifu_addr = icache_saved_addr + {icache_beat_cnt, 2'b00};
     
-    // IFU 只在仲裁允许时发请求
-    wire ifu_can_req = (arb_state == ARB_IDLE && !lsu_req) || (arb_state == ARB_IFU);
+    // IFU 请求逻辑
+    // - IFU 只在没有 LSU 读请求时可以发
+    // - IFU 可以与 LSU 写并行
+    wire ifu_can_req_idle = (arb_state == ARB_IDLE) && !lsu_is_read;
+    wire ifu_can_req_active = (arb_state == ARB_IFU);
+    wire ifu_can_req_during_write = (arb_state == ARB_LSU_WRITE);  // LSU 写时 IFU 可以继续
+    wire ifu_can_req = ifu_can_req_idle || ifu_can_req_active || ifu_can_req_during_write;
     
     // 请求信号：只在 REQ 状态且仲裁允许时为高
     assign io_ifu_reqValid = (ifu_state == IFU_REQ) && ifu_can_req;
@@ -177,25 +182,42 @@ module ysyx_00000000 (
     assign ifu_rvalid      = io_ifu_respValid;
 `endif
 
-    // ========== IFU/LSU 仲裁 ==========
-    // D-stage MemBridge 在 IFU 和 LSU 同时请求时会出错
-    // 关键约束：io_ifu_reqValid 和 io_lsu_reqValid 不能同时为高
+    // ========== IFU/LSU 仲裁（优化版）==========
+    // D-stage MemBridge 的 IFU 和 LSU 请求冲突分析：
     //
-    // 简化策略：
-    // - IFU 和 LSU 串行化请求
-    // - 谁先请求谁先处理
-    // - 使用单一状态机跟踪当前活动的通道
+    // IFU 只使用 AR 通道（读取指令）
+    // LSU 读使用 AR 通道（与 IFU 冲突！）
+    // LSU 写使用 AW/W/B 通道（不与 IFU 冲突）
+    //
+    // 优化策略：
+    // - 只有 LSU 读操作需要阻塞 IFU
+    // - LSU 写操作可以与 IFU 并行
+    //
+    // 状态机：
+    //   - ARB_IDLE: 空闲
+    //   - ARB_IFU: IFU 正在读取
+    //   - ARB_LSU_READ: LSU 正在读取（阻塞 IFU）
+    //   - ARB_LSU_WRITE: LSU 正在写入（不阻塞 IFU）
     
-    localparam ARB_IDLE  = 2'd0;  // 空闲，等待请求
-    localparam ARB_IFU   = 2'd1;  // IFU 正在使用总线
-    localparam ARB_LSU   = 2'd2;  // LSU 正在使用总线
+    localparam ARB_IDLE      = 2'd0;
+    localparam ARB_IFU       = 2'd1;
+    localparam ARB_LSU_READ  = 2'd2;
+    localparam ARB_LSU_WRITE = 2'd3;
     
     reg [1:0] arb_state;
     
-    // IFU 正在使用总线 = 在 IFU 状态或 IFU 正在发请求
-    wire ifu_using_bus = (arb_state == ARB_IFU);
-    // LSU 正在使用总线 = 在 LSU 状态
-    wire lsu_using_bus = (arb_state == ARB_LSU);
+    // LSU 请求类型
+    wire lsu_is_read  = lsu_req && !lsu_wen;
+    wire lsu_is_write = lsu_req && lsu_wen;
+    
+    // 总线占用状态
+    wire ifu_using_bus       = (arb_state == ARB_IFU);
+    wire lsu_read_using_bus  = (arb_state == ARB_LSU_READ);
+    wire lsu_write_using_bus = (arb_state == ARB_LSU_WRITE);
+    wire lsu_using_bus       = lsu_read_using_bus || lsu_write_using_bus;
+    
+    // IFU 被阻塞条件：LSU 正在读取
+    wire ifu_blocked = lsu_read_using_bus || lsu_is_read;
     
     always @(posedge clk or posedge rst) begin
         if (rst) begin
@@ -203,39 +225,50 @@ module ysyx_00000000 (
         end else begin
             case (arb_state)
                 ARB_IDLE: begin
-                    // LSU 优先级更高
-                    if (lsu_req) begin
-                        arb_state <= ARB_LSU;
+                    // LSU 读优先级最高（防止 AR 通道冲突）
+                    if (lsu_is_read) begin
+                        arb_state <= ARB_LSU_READ;
+                    end else if (lsu_is_write) begin
+                        arb_state <= ARB_LSU_WRITE;
                     end else if (ifu_state == IFU_REQ) begin
                         arb_state <= ARB_IFU;
                     end
                 end
                 ARB_IFU: begin
-                    // IFU 正在使用总线
+                    // IFU 正在使用 AR 通道
                     if (io_ifu_respValid) begin
-                        // 收到响应
                         if (icache_beat_cnt == 2'd3) begin
                             // burst 完成
                             arb_state <= ARB_IDLE;
                         end
-                        // 如果 burst 未完成，保持 IFU 状态
                     end
+                    // 如果有 LSU 读请求，需要在 burst 完成后处理
                 end
-                ARB_LSU: begin
-                    // LSU 正在使用总线
+                ARB_LSU_READ: begin
+                    // LSU 正在读取（使用 AR 通道）
                     if (io_lsu_respValid) begin
-                        // LSU 完成
                         arb_state <= ARB_IDLE;
                     end
+                end
+                ARB_LSU_WRITE: begin
+                    // LSU 正在写入（使用 AW/W/B 通道，不阻塞 IFU）
+                    if (io_lsu_respValid) begin
+                        arb_state <= ARB_IDLE;
+                    end
+                    // 允许 IFU 在写期间继续工作
                 end
                 default: arb_state <= ARB_IDLE;
             endcase
         end
     end
     
-    // LSU 请求转换
-    // LSU 只在仲裁允许时发请求
-    wire lsu_can_req = (arb_state == ARB_IDLE) || (arb_state == ARB_LSU);
+    // LSU 请求逻辑
+    // - LSU 读：只在 IDLE 或 LSU_READ 状态允许
+    // - LSU 写：在 IDLE, LSU_WRITE, 或 IFU 状态都允许（不冲突）
+    wire lsu_read_can_req  = (arb_state == ARB_IDLE) || (arb_state == ARB_LSU_READ);
+    wire lsu_write_can_req = (arb_state == ARB_IDLE) || (arb_state == ARB_LSU_WRITE) || (arb_state == ARB_IFU);
+    wire lsu_can_req = (lsu_is_read && lsu_read_can_req) || (lsu_is_write && lsu_write_can_req);
+    
     assign io_lsu_addr     = lsu_addr;
     assign io_lsu_reqValid = lsu_req && lsu_can_req;
     assign io_lsu_size     = 2'b10;  // 默认字访问 (4 bytes)
