@@ -23,23 +23,30 @@ Area heap = RANGE(&_heap_start, &_heap_end);
 #define UART_DLM  (1 * 4)   // 除数锁存器高字节 (DLAB=1)
 
 void uart_init() {
+  // 仿真模式下使用更短的延迟
+#ifdef SIMULATION
+  #define UART_DELAY 10
+#else
+  #define UART_DELAY 1000
+#endif
+  
   // 确保足够的延迟让硬件稳定
-  for (volatile int i = 0; i < 1000; i++);
+  for (volatile int i = 0; i < UART_DELAY; i++);
   
   // Set DLAB=1 to access divisor registers (LCR bit 7)
   *(volatile uint8_t *)(UART_BASE + UART_LCR) = 0x80; 
-  for (volatile int i = 0; i < 1000; i++);
+  for (volatile int i = 0; i < UART_DELAY; i++);
   
   // Set divisor = 1 for maximum baud rate
   // dl > 0 is required for enable signal
   *(volatile uint8_t *)(UART_BASE + UART_DLL) = 0x01;
-  for (volatile int i = 0; i < 500; i++);
+  for (volatile int i = 0; i < UART_DELAY/2; i++);
   *(volatile uint8_t *)(UART_BASE + UART_DLM) = 0x00;
-  for (volatile int i = 0; i < 500; i++);
+  for (volatile int i = 0; i < UART_DELAY/2; i++);
   
   // Clear DLAB, set 8N1 format (8 data bits, no parity, 1 stop bit)
   *(volatile uint8_t *)(UART_BASE + UART_LCR) = 0x03;
-  for (volatile int i = 0; i < 1000; i++);
+  for (volatile int i = 0; i < UART_DELAY; i++);
 }
 
 void putch(char ch) {

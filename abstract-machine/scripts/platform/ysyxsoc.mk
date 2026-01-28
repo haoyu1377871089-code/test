@@ -1,9 +1,19 @@
+# 简化 TRM：用于快速仿真测试
+ifdef SIMPLE_TRM
+AM_SRCS := platform/ysyxsoc/trm_simple.c
+else
 AM_SRCS := platform/ysyxsoc/trm.c \
            platform/ysyxsoc/ioe/ioe.c \
            platform/ysyxsoc/spi.c
+endif
 
 CFLAGS    += -fdata-sections -ffunction-sections
 LDFLAGS   += --gc-sections -e _start
+
+# 仿真模式：减少延迟
+ifdef SIM
+CFLAGS += -DSIMULATION
+endif
 
 # 选择链接脚本：
 # SRAM_RUN=1  - 代码在 SRAM 中运行
