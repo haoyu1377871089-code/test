@@ -30,6 +30,7 @@ compile_commands.json
 .bloop/
 .bsp/
 .cache/
+.toolchains/
 
 # Python
 __pycache__/
