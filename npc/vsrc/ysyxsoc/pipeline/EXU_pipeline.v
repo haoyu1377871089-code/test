@@ -130,8 +130,8 @@ module EXU_pipeline (
             // Load/Store 地址计算
             7'b0000011,
             7'b0100011: alu_result = alu_a + alu_b;
-            // JALR 目标地址计算
-            7'b1100111: alu_result = (alu_a + alu_b) & 32'hFFFFFFFE;
+            // JALR: rd 保存返回地址 pc + 4，跳转目标另外计算
+            7'b1100111: alu_result = in_pc + 32'd4;
             // LUI
             7'b0110111: alu_result = in_imm;
             // AUIPC
@@ -160,7 +160,9 @@ module EXU_pipeline (
     
     // 只有输入有效时才产生分支信号
     wire branch_taken = in_valid && in_is_branch && branch_cond;
-    wire [31:0] branch_target = in_is_jalr ? alu_result :       // JALR: rs1 + imm
+    // JALR 跳转目标: (rs1 + imm) & ~1
+    wire [31:0] jalr_target = (in_rs1_data + in_imm) & 32'hFFFFFFFE;
+    wire [31:0] branch_target = in_is_jalr ? jalr_target :      // JALR: rs1 + imm
                                 in_is_jal  ? (in_pc + in_imm) : // JAL: pc + imm
                                              (in_pc + in_imm);  // Branch: pc + imm
     
