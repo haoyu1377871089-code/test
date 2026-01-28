@@ -106,6 +106,7 @@
 || 2026-01-25 | fe89758 | 基线版本 | - | - | 单周期NPC, microbench test CPI≈951 |
 || 2026-01-25 | WIP | I-Cache 修复并启用 | 522M → 30M (**17.18x**) | 0.001 → 0.018 | CPI 从 951 降至 55 |
 || 2026-01-27 | 5974dd3 | 16B CacheLine + AXI4 Burst | 30.4M → 30.8M | - | Hit Rate 98.78% → 99.67%, Miss 6690 → 1786 (**3.74x fewer**) |
+|| 2026-01-28 | WIP | **D-Cache 启用** | 30.6M → 24.9M (**18.7%↓**) | 0.018 → 0.022 | CPI 55.66 → 45.23 (**18.7% 改善**), Read Hit 96.65% |
 
 ## I-Cache 优化效果对比
 
@@ -155,6 +156,64 @@
 ```makefile
 VERILATOR_CFLAGS += ... +define+SIMULATION +define+ENABLE_ICACHE
 ```
+
+## D-Cache 设计参数
+
+### 当前配置 (16B Cache Line)
+
+|| 参数 | 数值 | 说明 |
+||------|------|------|
+|| 总大小 | 4 KB | 与 I-Cache 相同 |
+|| 关联度 | 2-way | 降低冲突 miss |
+|| 块大小 | 16 Bytes | 4 words |
+|| 组数 | 128 sets | 4KB / 2-way / 16B = 128 |
+|| 写策略 | Write-through + No-write-allocate | 所有写入直接到内存，写 miss 不填充 cache |
+|| 替换策略 | LRU | 2-way 只需 1 bit per set |
+|| 可缓存区域 | PSRAM (0x80000000), SDRAM (0xa0000000) | I/O 设备自动 bypass |
+
+### 启用方法
+在 `npc/Makefile.soc` 中使用 `ENABLE_DCACHE=1`:
+```bash
+make -f Makefile.soc soc ENABLE_DCACHE=1
+```
+
+### 性能数据 (microbench test, I-Cache + D-Cache)
+
+|| 项目 | 数值 |
+||------|------|
+|| Total Cycles | 24,867,697 |
+|| Retired Instrs | 549,699 |
+|| **CPI** | **45.23** |
+|| WAIT_LSU Cycles | 14,173,375 (56%) |
+
+### D-Cache 统计
+
+|| 项目 | 数值 |
+||------|------|
+|| Read Hit Count | 29,471 |
+|| Read Miss Count | 1,019 |
+|| Write Hit Count | 8,744 |
+|| Write Miss Count | 21,014 |
+|| **Read Hit Rate** | **96.65%** |
+|| Total Cycles | 14,044,328 |
+|| Refill Cycles | 952,765 |
+|| Avg Refill Latency | 935 cycles |
+|| AMAT | 108.83 cycles |
+
+### D-Cache 优化效果分析
+
+|| 指标 | 无 D-Cache | 启用 D-Cache | 变化 |
+||------|-----------|-------------|------|
+|| CPI | 55.66 | **45.23** | **-18.7%** |
+|| 总周期数 | 30,593,144 | 24,867,697 | **-18.7%** |
+|| WAIT_LSU 占比 | 65% | 56% | -9% |
+|| Avg Load 延迟 | 185.75 cycles | 170.35 cycles | -8.3% |
+
+**分析**:
+1. **Read Hit Rate 96.65%**: 大部分 load 指令从 D-Cache 命中，显著减少内存访问
+2. **CPI 降低 18.7%**: 从 55.66 降至 45.23
+3. **Write Miss 较多**: 由于 write-through + no-write-allocate 策略，写 miss 不会填充 cache
+4. **Store 延迟不变**: Write-through 策略下所有写入仍需访问内存
 
 ## 已修复的 Bug (2026-01-25)
 

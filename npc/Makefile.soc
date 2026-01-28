@@ -60,6 +60,11 @@ ifndef NO_ICACHE
     VERILATOR_FLAGS += +define+ENABLE_ICACHE
 endif
 
+# D-Cache 配置 (可通过 ENABLE_DCACHE=1 启用)
+ifdef ENABLE_DCACHE
+    VERILATOR_FLAGS += +define+ENABLE_DCACHE
+endif
+
 # 所有 Verilog 文件
 ALL_VSRCS = $(YSYXSOC_VFILE) $(PERIP_VSRCS) $(NPC_VSRCS)
 
