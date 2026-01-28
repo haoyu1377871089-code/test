@@ -205,6 +205,44 @@ make -f Makefile.soc DCACHE=1 soc
 VERILATOR_CFLAGS += ... +define+SIMULATION +define+ENABLE_ICACHE
 ```
 
+## 流水线版本性能 (2026-01-28)
+
+### 五级流水线实现
+
+流水线版本实现了经典的五级流水线架构：IF → ID → EX → MEM → WB
+
+#### 流水线与多周期对比 (microbench test)
+
+|| 指标 | 多周期版本 | 流水线版本 | 变化 |
+||------|------------|------------|------|
+|| **CPI** | **55.66** | **49.70** | **-10.7%** |
+|| 总周期数 | 30,593,144 | 27,345,779 | -10.6% |
+|| 退休指令数 | 549,606 | 550,179 | +0.1% |
+|| I-Cache Hit Rate | 99.68% | 类似 | - |
+
+#### 性能分析
+
+1. **CPI 降低约 11%**: 流水线允许多条指令重叠执行
+2. **数据冒险处理**: 实现了完整的转发逻辑 (EX → ID, MEM → ID, WB → ID)
+3. **控制冒险**: 分支/跳转指令导致 1-2 周期的气泡
+4. **Load-use 冒险**: 需要 1 个周期的 stall
+
+#### 已修复的流水线 Bug
+
+**JALR 返回地址错误 (2026-01-28, commit ec9f9f5)**
+- **问题**: JALR 指令的 `alu_result` 被设置为跳转目标地址 `(rs1+imm)&~1`，而不是返回地址 `pc+4`
+- **影响**: 函数调用时返回地址被覆盖为跳转目标，导致函数无法正确返回，被重复执行
+- **修复**: 
+  1. JALR 的 `alu_result` 改为 `pc + 4` (写入 rd 的返回地址)
+  2. 新增 `jalr_target = (rs1 + imm) & ~1` 用于计算跳转目标
+  3. `branch_target` mux 使用 `jalr_target` 而非 `alu_result`
+
+### 流水线启用方法
+
+```bash
+make -f Makefile.soc pipeline IMG=<binary>
+```
+
 ## 已修复的 Bug (2026-01-25)
 
 ### 1. IFU_AXI 并发赋值冲突
