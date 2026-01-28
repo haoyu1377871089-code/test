@@ -807,8 +807,8 @@ module NPC_pipeline (
         end else begin
             dbg_cycle <= dbg_cycle + 1;
             if (wbu_inst_commit) dbg_commit_cnt <= dbg_commit_cnt + 1;
-            // 每 100K 周期打印一次
-            if (dbg_cycle[16:0] == 0) begin
+            // 每 10M 周期打印一次（减少输出频率）
+            if (dbg_cycle[23:0] == 0 && dbg_cycle != 0) begin
                 $display("[PIPE@%0d] pc=%h commits=%0d",
                          dbg_cycle, pc, dbg_commit_cnt);
             end

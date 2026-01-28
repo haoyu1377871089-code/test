@@ -87,8 +87,8 @@ reg [TAG_WIDTH-1:0]   refill_tag;
 reg                   refill_way;                 // Which way to fill (from LRU)
 reg [WORD_OFFSET-1:0] refill_word_cnt;            // Current word being filled
 
-// Debug: ICache state
-`ifdef SIMULATION
+// Debug: ICache state (disabled to reduce output)
+`ifdef SIMULATION_DEBUG_ICACHE
     reg [63:0] ic_dbg_cycle;
     always @(posedge clk or posedge rst) begin
         if (rst) begin

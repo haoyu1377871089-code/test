@@ -105,14 +105,36 @@ module LSU_pipeline (
     // ========== Load 数据提取 ==========
     // 注意：使用保存的 mem_result，而不是实时的 mem_rdata
     // 因为在 S_DONE 状态时 mem_rdata 可能已经无效
+    // 根据地址偏移量选择正确的字节
     reg [31:0] load_result;
+    reg [7:0]  load_byte;
+    reg [15:0] load_half;
+    
+    // 根据地址偏移选择字节
+    always @(*) begin
+        case (addr_offset)
+            2'b00: load_byte = mem_result[7:0];
+            2'b01: load_byte = mem_result[15:8];
+            2'b10: load_byte = mem_result[23:16];
+            2'b11: load_byte = mem_result[31:24];
+        endcase
+    end
+    
+    // 根据地址偏移选择半字
+    always @(*) begin
+        case (addr_offset[1])
+            1'b0: load_half = mem_result[15:0];
+            1'b1: load_half = mem_result[31:16];
+        endcase
+    end
+    
     always @(*) begin
         case (funct3_reg)
-            3'b000: load_result = {{24{mem_result[7]}}, mem_result[7:0]};   // LB
-            3'b001: load_result = {{16{mem_result[15]}}, mem_result[15:0]}; // LH
-            3'b010: load_result = mem_result;                              // LW
-            3'b100: load_result = {24'b0, mem_result[7:0]};                // LBU
-            3'b101: load_result = {16'b0, mem_result[15:0]};               // LHU
+            3'b000: load_result = {{24{load_byte[7]}}, load_byte};     // LB
+            3'b001: load_result = {{16{load_half[15]}}, load_half};    // LH
+            3'b010: load_result = mem_result;                          // LW
+            3'b100: load_result = {24'b0, load_byte};                  // LBU
+            3'b101: load_result = {16'b0, load_half};                  // LHU
             default: load_result = mem_result;
         endcase
     end

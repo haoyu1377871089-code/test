@@ -229,8 +229,8 @@ always @(posedge clk or posedge rst) begin
     end
 end
 
-// Debug: IFU_AXI4 state
-`ifdef SIMULATION
+// Debug: IFU_AXI4 state (disabled to reduce output)
+`ifdef SIMULATION_DEBUG_IFU
     reg [63:0] ifu_dbg_cycle;
     always @(posedge clk or posedge rst) begin
         if (rst) begin

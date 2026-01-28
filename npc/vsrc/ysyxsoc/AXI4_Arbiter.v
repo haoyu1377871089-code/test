@@ -429,8 +429,8 @@ always @(*) begin
     endcase
 end
 
-// Debug: Arbiter state
-`ifdef SIMULATION
+// Debug: Arbiter state (disabled to reduce output)
+`ifdef SIMULATION_DEBUG_ARB
     reg [63:0] arb_dbg_cycle;
     always @(posedge clk or posedge rst) begin
         if (rst) begin
