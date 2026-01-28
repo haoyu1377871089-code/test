@@ -233,16 +233,24 @@ end
 ## 八、测试命令
 
 ```bash
-# 构建并运行流水线版本
-cd /home/hy258/ysyx-workbench/npc
+# 构建流水线版本
+cd /workspace/npc
 make -f Makefile.soc pipeline
 
-# 运行 dummy 测试（带超时）
-timeout 120s ./build_soc/ysyxSoCFull --no-nvboard -b \
-  /home/hy258/ysyx-workbench/am-kernels/tests/cpu-tests/build/dummy-riscv32e-ysyxsoc.bin
+# 构建 dummy / microbench 镜像
+make -C /workspace/am-kernels/tests/cpu-tests ARCH=riscv32e-ysyxsoc ALL=dummy
+make -C /workspace/am-kernels/benchmarks/microbench ARCH=riscv32e-ysyxsoc
+
+# 运行 dummy 测试（最长 10 分钟）
+timeout 600s ./build_soc/ysyxSoCFull --no-gui \
+  /workspace/am-kernels/tests/cpu-tests/build/dummy-riscv32e-ysyxsoc.bin
+
+# 运行 microbench 测试（最长 10 分钟）
+timeout 600s ./build_soc/ysyxSoCFull --no-gui \
+  /workspace/am-kernels/benchmarks/microbench/build/microbench-riscv32e-ysyxsoc.bin
 
 # 运行单周期版本对比
 make -f Makefile.soc soc
-timeout 120s ./build_soc/ysyxSoCFull --no-nvboard -b \
-  /home/hy258/ysyx-workbench/am-kernels/tests/cpu-tests/build/dummy-riscv32e-ysyxsoc.bin
+timeout 600s ./build_soc/ysyxSoCFull --no-gui \
+  /workspace/am-kernels/tests/cpu-tests/build/dummy-riscv32e-ysyxsoc.bin
 ```

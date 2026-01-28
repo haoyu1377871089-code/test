@@ -1,0 +1,69 @@
+TOPNAME = ysyxSoCFull
+
+YSYX_SOC_HOME ?= $(abspath ../ysyxSoC)
+NPC_HOME ?= $(abspath .)
+NVBOARD_HOME ?= $(abspath ../nvboard)
+AM_HOME ?= $(abspath ../abstract-machine)
+
+YSYXSOC_BUILD_V = $(YSYX_SOC_HOME)/build/ysyxSoCFull.v
+YSYXSOC_READY_V = $(YSYX_SOC_HOME)/ready-to-run/D-stage/ysyxSoCFull.v
+YSYXSOC_V := $(if $(wildcard $(YSYXSOC_BUILD_V)),$(YSYXSOC_BUILD_V),$(YSYXSOC_READY_V))
+
+YSYXSOC_PERIP = $(YSYX_SOC_HOME)/perip
+YSYXSOC_PERIP_V = $(shell find $(YSYXSOC_PERIP) -name "*.v" -o -name "*.sv")
+
+NPC_VSRC = $(NPC_HOME)/vsrc/ysyxsoc
+NPC_VSRC_V = $(shell find $(NPC_VSRC) -maxdepth 1 -name "*.v")
+NPC_PIPELINE_V = $(shell find $(NPC_VSRC)/pipeline -name "*.v")
+
+VSRCS = $(sort $(YSYXSOC_V) $(YSYXSOC_PERIP_V) $(NPC_VSRC_V) $(NPC_PIPELINE_V))
+
+CSRCS = $(abspath ./csrc/main_soc.cpp) \
+        $(abspath ./csrc/memory.cpp) \
+        $(abspath ./csrc/dev/devices.cpp)
+
+BUILD_DIR = ./build_soc
+OBJ_DIR = $(BUILD_DIR)/obj_dir
+BIN = $(BUILD_DIR)/$(TOPNAME)
+
+VERILATOR = verilator
+VERILATOR_CFLAGS += -MMD --build -cc \
+                    -O3 --x-assign fast --x-initial fast --noassert --trace \
+                    +define+SIMULATION
+
+SOC_DEFINES ?= +define+ENABLE_ICACHE
+PIPELINE_DEFINES ?= $(SOC_DEFINES) +define+ENABLE_PIPELINE
+EXTRA_DEFINES ?=
+
+INC_PATH += $(AM_HOME)/am/include
+INC_PATH += $(NPC_HOME)/csrc $(NPC_HOME)/csrc/dev
+INC_PATH += $(NVBOARD_HOME)/include
+INC_PATH += $(YSYXSOC_PERIP)/uart16550/rtl $(YSYXSOC_PERIP)/spi/rtl
+INCFLAGS = $(addprefix -I, $(INC_PATH))
+
+include $(NVBOARD_HOME)/scripts/nvboard.mk
+
+CXXFLAGS += $(INCFLAGS) -DTOP_NAME="\"V$(TOPNAME)\"" -std=c++11
+LDFLAGS += -ldl -lrt -lpthread
+
+$(shell mkdir -p $(BUILD_DIR))
+
+soc: VERILATOR_DEFINES = $(SOC_DEFINES) $(EXTRA_DEFINES)
+soc: $(BIN)
+
+pipeline: VERILATOR_DEFINES = $(PIPELINE_DEFINES) $(EXTRA_DEFINES)
+pipeline: $(BIN)
+
+$(BIN): $(VSRCS) $(CSRCS) $(NVBOARD_ARCHIVE)
+	@rm -rf $(OBJ_DIR)
+	$(VERILATOR) $(VERILATOR_CFLAGS) $(VERILATOR_DEFINES) \
+        -I$(NPC_VSRC) -I$(NPC_VSRC)/pipeline \
+        -I$(YSYXSOC_PERIP)/uart16550/rtl -I$(YSYXSOC_PERIP)/spi/rtl \
+        --top-module $(TOPNAME) $^ \
+        $(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
+        --Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
+
+clean:
+	rm -rf $(BUILD_DIR)
+
+.PHONY: soc pipeline clean
