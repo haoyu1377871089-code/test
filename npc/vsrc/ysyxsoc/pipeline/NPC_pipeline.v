@@ -219,8 +219,8 @@ module NPC_pipeline (
     // 结构冒险: MEM 阶段访存时需要暂停
     wire mem_busy = ex_mem_valid && (ex_mem_mem_ren || ex_mem_mem_wen) && !lsu_out_valid;
     
-    // ========== RAW 数据冒险检测 ==========
-    // 检测 ID 阶段源寄存器与后续阶段目标寄存器的冲突
+    // ========== RAW 数据冒险检测与转发 ==========
+    // 转发技术：将后续阶段的计算结果直接转发到 ID 阶段，避免等待写回
     
     // ID 阶段的源寄存器（来自 IDU 输出）
     wire [4:0] id_rs1 = idu_out_rs1;
@@ -231,16 +231,22 @@ module NPC_pipeline (
     // EX 阶段的目标寄存器
     wire [4:0] ex_rd = id_ex_rd;
     wire ex_writes_reg = id_ex_valid && id_ex_reg_wen && (ex_rd != 5'b0);
+    // EX 阶段是否为 load 指令（load 指令数据在 MEM 阶段才就绪）
+    wire ex_is_load = id_ex_valid && id_ex_mem_ren;
+    // EX 阶段可以转发的条件：写寄存器且不是 load 指令
+    wire ex_can_forward = ex_writes_reg && !ex_is_load;
+    // EX 阶段的转发数据：来自 EXU 的 ALU 结果
+    wire [31:0] ex_fwd_data = exu_out_alu_result;
     
     // MEM 阶段的目标寄存器
     wire [4:0] mem_rd = ex_mem_rd;
     wire mem_writes_reg = ex_mem_valid && ex_mem_reg_wen && (mem_rd != 5'b0);
+    // MEM 阶段可以转发的条件：LSU 输出有效
+    wire mem_can_forward = lsu_out_valid && ex_mem_reg_wen && (mem_rd != 5'b0);
+    // MEM 阶段的转发数据：来自 LSU 的输出结果
+    wire [31:0] mem_fwd_data = lsu_out_result;
     
     // WB 阶段的目标寄存器
-    // 关键修复：使用 WBU 的实际写入信号，而不是 mem_wb_valid
-    // WBU 需要额外一个周期才能写入寄存器堆，所以:
-    // 1. wbu_rf_wen: WBU 正在写入寄存器堆（在 S_COMMIT 状态）
-    // 2. mem_wb_valid: MEM/WB 有待处理的数据（WBU 在 S_IDLE，即将接收）
     wire [4:0] wb_rd = mem_wb_rd;
     wire [4:0] wbu_rd = wbu_rf_waddr;
     
@@ -248,19 +254,52 @@ module NPC_pipeline (
     wire wbu_writing = wbu_rf_wen && (wbu_rd != 5'b0);
     // MEM/WB 有待处理数据（还未被 WBU 接收）
     wire pending_wb = mem_wb_valid && mem_wb_reg_wen && (wb_rd != 5'b0);
+    // WB 阶段可以转发
+    wire wb_can_forward_wbu = wbu_writing;
+    wire wb_can_forward_pending = pending_wb;
+    // WB 阶段的转发数据
+    wire [31:0] wb_fwd_data_wbu = wbu_rf_wdata;
+    wire [31:0] wb_fwd_data_pending = mem_wb_result;
     
-    // RAW 冒险检测
-    wire raw_ex_rs1 = id_uses_rs1 && ex_writes_reg && (id_rs1 == ex_rd);
-    wire raw_ex_rs2 = id_uses_rs2 && ex_writes_reg && (id_rs2 == ex_rd);
-    wire raw_mem_rs1 = id_uses_rs1 && mem_writes_reg && (id_rs1 == mem_rd);
-    wire raw_mem_rs2 = id_uses_rs2 && mem_writes_reg && (id_rs2 == mem_rd);
-    // WB 阶段冒险：检查 WBU 正在写入 或 MEM/WB 有待处理数据
-    wire raw_wb_rs1 = id_uses_rs1 && ((wbu_writing && (id_rs1 == wbu_rd)) || 
-                                       (pending_wb && (id_rs1 == wb_rd)));
-    wire raw_wb_rs2 = id_uses_rs2 && ((wbu_writing && (id_rs2 == wbu_rd)) || 
-                                       (pending_wb && (id_rs2 == wb_rd)));
+    // ========== 转发逻辑（优先级：EX > MEM > WB，最年轻优先）==========
+    // RS1 转发
+    wire fwd_ex_rs1 = id_uses_rs1 && ex_can_forward && (id_rs1 == ex_rd);
+    wire fwd_mem_rs1 = id_uses_rs1 && mem_can_forward && (id_rs1 == mem_rd) && !fwd_ex_rs1;
+    wire fwd_wb_wbu_rs1 = id_uses_rs1 && wb_can_forward_wbu && (id_rs1 == wbu_rd) && !fwd_ex_rs1 && !fwd_mem_rs1;
+    wire fwd_wb_pending_rs1 = id_uses_rs1 && wb_can_forward_pending && (id_rs1 == wb_rd) && !fwd_ex_rs1 && !fwd_mem_rs1 && !fwd_wb_wbu_rs1;
     
-    wire raw_hazard = raw_ex_rs1 || raw_ex_rs2 || raw_mem_rs1 || raw_mem_rs2 || raw_wb_rs1 || raw_wb_rs2;
+    wire [31:0] forwarded_rs1_data = fwd_ex_rs1 ? ex_fwd_data :
+                                     fwd_mem_rs1 ? mem_fwd_data :
+                                     fwd_wb_wbu_rs1 ? wb_fwd_data_wbu :
+                                     fwd_wb_pending_rs1 ? wb_fwd_data_pending :
+                                     idu_out_rs1_data;
+    
+    // RS2 转发
+    wire fwd_ex_rs2 = id_uses_rs2 && ex_can_forward && (id_rs2 == ex_rd);
+    wire fwd_mem_rs2 = id_uses_rs2 && mem_can_forward && (id_rs2 == mem_rd) && !fwd_ex_rs2;
+    wire fwd_wb_wbu_rs2 = id_uses_rs2 && wb_can_forward_wbu && (id_rs2 == wbu_rd) && !fwd_ex_rs2 && !fwd_mem_rs2;
+    wire fwd_wb_pending_rs2 = id_uses_rs2 && wb_can_forward_pending && (id_rs2 == wb_rd) && !fwd_ex_rs2 && !fwd_mem_rs2 && !fwd_wb_wbu_rs2;
+    
+    wire [31:0] forwarded_rs2_data = fwd_ex_rs2 ? ex_fwd_data :
+                                     fwd_mem_rs2 ? mem_fwd_data :
+                                     fwd_wb_wbu_rs2 ? wb_fwd_data_wbu :
+                                     fwd_wb_pending_rs2 ? wb_fwd_data_pending :
+                                     idu_out_rs2_data;
+    
+    // ========== RAW 冒险检测（仅检测无法通过转发解决的冒险）==========
+    // Load-use 冒险：EX 阶段是 load 指令，后续指令依赖其结果
+    wire load_use_rs1 = id_uses_rs1 && ex_is_load && ex_writes_reg && (id_rs1 == ex_rd);
+    wire load_use_rs2 = id_uses_rs2 && ex_is_load && ex_writes_reg && (id_rs2 == ex_rd);
+    wire load_use_hazard = load_use_rs1 || load_use_rs2;
+    
+    // MEM 阶段的 load 指令正在等待数据返回（LSU 未完成）
+    wire mem_load_waiting = ex_mem_valid && ex_mem_mem_ren && !lsu_out_valid;
+    wire raw_mem_rs1 = id_uses_rs1 && mem_load_waiting && ex_mem_reg_wen && (id_rs1 == mem_rd);
+    wire raw_mem_rs2 = id_uses_rs2 && mem_load_waiting && ex_mem_reg_wen && (id_rs2 == mem_rd);
+    wire mem_load_hazard = raw_mem_rs1 || raw_mem_rs2;
+    
+    // 总 RAW 冒险：只有无法转发的冒险才需要 stall
+    wire raw_hazard = load_use_hazard || mem_load_hazard;
     
     // 暂停信号
     // stall_if: IF 阶段只在 MEM busy 或下游阻塞时暂停
@@ -270,12 +309,14 @@ module NPC_pipeline (
     assign stall_ex  = mem_busy;
     assign stall_mem = mem_busy;  // MEM 阶段在内存访问未完成时暂停
     
-    // 控制冒险冲刷: 分支/跳转/异常时冲刷流水线
+    // 控制冒险冲刷: 分支/跳转/异常/fence.i 时冲刷流水线
     wire branch_flush = exu_branch_taken || exu_is_jump;
     wire exception_flush = wbu_exception_valid;
+    // fence.i 需要冲刷流水线中比它年轻的指令，确保后续取指看到最新数据
+    wire fence_flush = exu_is_fence && id_ex_valid;
     
-    assign flush_if  = branch_flush || exception_flush;
-    assign flush_id  = branch_flush || exception_flush;
+    assign flush_if  = branch_flush || exception_flush || fence_flush;
+    assign flush_id  = branch_flush || exception_flush || fence_flush;
     assign flush_ex  = exception_flush;
     
     // ========== IF 阶段逻辑 ==========
@@ -419,11 +460,12 @@ module NPC_pipeline (
             // EX 阶段不被阻塞，可以接收新数据
             if (!stall_id && idu_out_valid) begin
                 // ID 阶段不被阻塞且有有效输出，传递新指令
+                // 使用转发后的数据（如果有转发）
                 id_ex_valid <= 1'b1;
                 id_ex_pc <= idu_out_pc;
                 id_ex_inst <= idu_out_inst;
-                id_ex_rs1_data <= idu_out_rs1_data;
-                id_ex_rs2_data <= idu_out_rs2_data;
+                id_ex_rs1_data <= forwarded_rs1_data;  // 使用转发后的数据
+                id_ex_rs2_data <= forwarded_rs2_data;  // 使用转发后的数据
                 id_ex_imm <= idu_out_imm;
                 id_ex_rd <= idu_out_rd;
                 id_ex_rs1 <= idu_out_rs1;
