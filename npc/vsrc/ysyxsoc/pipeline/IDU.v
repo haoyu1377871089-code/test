@@ -51,6 +51,23 @@ module IDU (
     input  [4:0]  rf_waddr,
     input  [31:0] rf_wdata,
     
+    // 转发路径 (for forwarding)
+    // EX 阶段转发
+    input         ex_valid,
+    input         ex_reg_wen,
+    input  [4:0]  ex_rd,
+    input  [31:0] ex_result,
+    // MEM 阶段转发
+    input         mem_valid,
+    input         mem_reg_wen,
+    input  [4:0]  mem_rd,
+    input  [31:0] mem_result,
+    // WB 阶段转发（已经在当前周期写入寄存器堆，但可能还在 MEM/WB 寄存器中）
+    input         wb_valid,
+    input         wb_reg_wen,
+    input  [4:0]  wb_rd,
+    input  [31:0] wb_result,
+    
     // 冲刷信号
     input         flush
 );
@@ -110,8 +127,8 @@ module IDU (
     end
     
     // ========== 寄存器文件 ==========
-    wire [31:0] rs1_data;
-    wire [31:0] rs2_data;
+    wire [31:0] rs1_data_rf;
+    wire [31:0] rs2_data_rf;
     
     RegisterFile #(.ADDR_WIDTH(5), .DATA_WIDTH(32)) u_regfile (
         .clk    (clk),
@@ -120,10 +137,32 @@ module IDU (
         .waddr  (rf_waddr),
         .wen    (rf_wen),
         .raddr1 (rs1),
-        .rdata1 (rs1_data),
+        .rdata1 (rs1_data_rf),
         .raddr2 (rs2),
-        .rdata2 (rs2_data)
+        .rdata2 (rs2_data_rf)
     );
+    
+    // ========== 转发检测逻辑 ==========
+    // 转发优先级：EX > MEM > WB（最年轻优先）
+    // EX 阶段转发（需要 valid 和 reg_wen）
+    wire forward_ex_rs1 = ex_valid && ex_reg_wen && (ex_rd != 5'b0) && (rs1 == ex_rd) && (rs1 != 5'b0);
+    wire forward_ex_rs2 = ex_valid && ex_reg_wen && (ex_rd != 5'b0) && (rs2 == ex_rd) && (rs2 != 5'b0);
+    // MEM 阶段转发（如果 EX 阶段没有转发）
+    wire forward_mem_rs1 = !forward_ex_rs1 && mem_valid && mem_reg_wen && (mem_rd != 5'b0) && (rs1 == mem_rd) && (rs1 != 5'b0);
+    wire forward_mem_rs2 = !forward_ex_rs2 && mem_valid && mem_reg_wen && (mem_rd != 5'b0) && (rs2 == mem_rd) && (rs2 != 5'b0);
+    // WB 阶段转发（如果 EX 和 MEM 阶段都没有转发）
+    wire forward_wb_rs1 = !forward_ex_rs1 && !forward_mem_rs1 && wb_valid && wb_reg_wen && (wb_rd != 5'b0) && (rs1 == wb_rd) && (rs1 != 5'b0);
+    wire forward_wb_rs2 = !forward_ex_rs2 && !forward_mem_rs2 && wb_valid && wb_reg_wen && (wb_rd != 5'b0) && (rs2 == wb_rd) && (rs2 != 5'b0);
+    
+    // ========== 数据选择（转发或寄存器文件） ==========
+    wire [31:0] rs1_data = forward_ex_rs1 ? ex_result :
+                           forward_mem_rs1 ? mem_result :
+                           forward_wb_rs1 ? wb_result :
+                           rs1_data_rf;
+    wire [31:0] rs2_data = forward_ex_rs2 ? ex_result :
+                           forward_mem_rs2 ? mem_result :
+                           forward_wb_rs2 ? wb_result :
+                           rs2_data_rf;
     
     // ========== 控制信号生成 ==========
     wire reg_wen = is_r_type || is_i_alu || is_load || is_jal || is_jalr || 

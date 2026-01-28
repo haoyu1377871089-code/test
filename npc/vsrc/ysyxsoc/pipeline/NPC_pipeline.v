@@ -582,6 +582,19 @@ module NPC_pipeline (
         .rf_wen      (wbu_rf_wen),
         .rf_waddr    (wbu_rf_waddr),
         .rf_wdata    (wbu_rf_wdata),
+        // 转发路径
+        .ex_valid    (id_ex_valid),
+        .ex_reg_wen  (id_ex_reg_wen),
+        .ex_rd       (id_ex_rd),
+        .ex_result   (exu_out_alu_result),
+        .mem_valid   (ex_mem_valid),
+        .mem_reg_wen (ex_mem_reg_wen),
+        .mem_rd      (ex_mem_rd),
+        .mem_result  (lsu_out_result),
+        .wb_valid    (mem_wb_valid),
+        .wb_reg_wen  (mem_wb_reg_wen),
+        .wb_rd       (mem_wb_rd),
+        .wb_result   (mem_wb_result),
         .flush       (flush_id)
     );
     
