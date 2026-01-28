@@ -1,0 +1,174 @@
+# Makefile.soc - ysyxSoC 配置的 NPC 构建脚本
+#
+# 使用方法:
+#   make -f Makefile.soc          # 构建多周期版本
+#   make -f Makefile.soc pipeline # 构建流水线版本
+#   make -f Makefile.soc run IMG=<binary>  # 运行程序
+
+# 目录配置
+YSYXSOC_HOME ?= $(abspath ../ysyxSoC)
+NPC_HOME     := $(abspath .)
+
+# Verilator 配置
+VERILATOR = verilator
+VERILATOR_FLAGS = -MMD --build -cc \
+                  -O3 --x-assign fast --x-initial fast --noassert \
+                  --no-timing \
+                  -Wno-TIMESCALEMOD -Wno-WIDTH -Wno-CASEINCOMPLETE -Wno-PINMISSING -Wno-fatal \
+                  +define+SIMULATION
+
+# 构建目录
+BUILD_DIR = ./build_soc
+OBJ_DIR = $(BUILD_DIR)/obj_dir
+BIN = $(BUILD_DIR)/ysyxSoCFull
+
+$(shell mkdir -p $(BUILD_DIR))
+
+# ========== ysyxSoC Verilog 文件 ==========
+# 使用 ysyxSoCTop.sv (AXI4 接口), 需要后处理转换信号名称
+YSYXSOC_VFILE_SRC := $(YSYXSOC_HOME)/ysyxSoCTop.sv
+YSYXSOC_VFILE := $(BUILD_DIR)/ysyxSoCFull.v
+ifeq ($(wildcard $(YSYXSOC_VFILE_SRC)),)
+    YSYXSOC_VFILE_SRC := $(YSYXSOC_HOME)/build/ysyxSoCFull.v
+endif
+
+# 后处理规则：转换 AXI 信号命名
+$(YSYXSOC_VFILE): $(YSYXSOC_VFILE_SRC)
+	@mkdir -p $(BUILD_DIR)
+	@echo "Processing ysyxSoC verilog..."
+	@cp $< $@
+	@sed -i -e 's/_\(aw\|ar\|w\|r\|b\)_\(\|bits_\)/_\1/g' $@
+	@sed -i '/firrtl_black_box_resource_files.f/,$$d' $@
+	@echo "  Output: $@"
+
+# 外设 Verilog 文件
+PERIP_VSRCS = $(shell find $(YSYXSOC_HOME)/perip -name "*.v" 2>/dev/null)
+
+# ========== NPC Verilog 文件 ==========
+# 默认使用多周期版本
+NPC_VSRC_DIR = $(NPC_HOME)/vsrc/ysyxsoc
+NPC_VSRCS = $(wildcard $(NPC_VSRC_DIR)/*.v)
+
+# 流水线版本需要额外包含 pipeline 目录
+ifdef PIPELINE
+    NPC_VSRCS += $(wildcard $(NPC_VSRC_DIR)/pipeline/*.v)
+    VERILATOR_FLAGS += +define+ENABLE_PIPELINE
+endif
+
+# I-Cache 默认启用
+VERILATOR_FLAGS += +define+ENABLE_ICACHE
+
+# 所有 Verilog 文件
+ALL_VSRCS = $(YSYXSOC_VFILE) $(PERIP_VSRCS) $(NPC_VSRCS)
+
+# ========== C++ 源文件 ==========
+# 使用简化的 main_soc_simple.cpp (无 NVBoard 依赖)
+CSRCS = $(NPC_HOME)/csrc/main_soc_simple.cpp \
+        $(NPC_HOME)/csrc/dev/devices.cpp \
+        $(NPC_HOME)/csrc/memory.cpp
+
+# ========== NVBoard 桩函数 (禁用 NVBoard) ==========
+SRC_AUTO_BIND = $(abspath $(BUILD_DIR)/auto_bind.cpp)
+
+$(SRC_AUTO_BIND):
+	@mkdir -p $(BUILD_DIR)
+	@echo "Creating NVBoard stub..."
+	@echo '#include <cstdio>' > $@
+	@echo '#include <cstdint>' >> $@
+	@echo 'extern "C" {' >> $@
+	@echo 'void nvboard_bind_all_pins(void* top) {}' >> $@
+	@echo 'void nvboard_init() {}' >> $@
+	@echo 'void nvboard_quit() {}' >> $@
+	@echo 'void nvboard_update() {}' >> $@
+	@echo 'int16_t uart_divisor_cnt = 0;' >> $@
+	@echo '}' >> $@
+
+CSRCS += $(SRC_AUTO_BIND)
+
+# ========== 编译选项 ==========
+INC_PATH = -I$(NPC_HOME)/csrc -I$(NPC_HOME)/csrc/dev
+
+# SDL2 配置
+SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null)
+SDL2_LDFLAGS := $(shell pkg-config --libs sdl2 2>/dev/null)
+ifeq ($(strip $(SDL2_CFLAGS)),)
+    SDL2_CFLAGS := -I/usr/include/SDL2
+    SDL2_LDFLAGS := -lSDL2
+endif
+
+# AM 头文件（如果存在）
+AM_HOME ?= $(abspath ../abstract-machine)
+ifneq ($(wildcard $(AM_HOME)/am/include),)
+    INC_PATH += -I$(AM_HOME)/am/include
+endif
+
+CXXFLAGS = $(INC_PATH) -DTOP_NAME="\"VysyxSoCFull\"" -std=c++11 $(SDL2_CFLAGS)
+LDFLAGS = -ldl -lrt -lpthread $(SDL2_LDFLAGS)
+
+# ========== 构建规则 ==========
+.PHONY: default all soc pipeline clean run help
+
+default: soc
+
+all: default
+
+# 多周期版本（默认）
+soc: $(BIN)
+
+# 流水线版本 (使用递归调用以确保 PIPELINE 变量在构建前设置)
+pipeline:
+	$(MAKE) -f Makefile.soc PIPELINE=1 $(BIN)
+	@echo "Built pipeline version with I-Cache enabled"
+
+$(BIN): $(ALL_VSRCS) $(CSRCS)
+	@echo "Building ysyxSoC simulation..."
+	@echo "  ysyxSoC verilog: $(YSYXSOC_VFILE)"
+	@echo "  NPC verilog dir: $(NPC_VSRC_DIR)"
+ifdef PIPELINE
+	@echo "  Mode: Pipeline"
+else
+	@echo "  Mode: Multi-cycle"
+endif
+	@rm -rf $(OBJ_DIR)
+	$(VERILATOR) $(VERILATOR_FLAGS) \
+		-I$(NPC_VSRC_DIR) \
+		-I$(NPC_VSRC_DIR)/pipeline \
+		-I$(YSYXSOC_HOME)/perip/spi/rtl \
+		-I$(YSYXSOC_HOME)/perip/uart16550/rtl \
+		--top-module ysyxSoCFull \
+		$(ALL_VSRCS) $(CSRCS) \
+		$(addprefix -CFLAGS , $(CXXFLAGS)) \
+		$(addprefix -LDFLAGS , $(LDFLAGS)) \
+		--Mdir $(OBJ_DIR) --exe -o $(abspath $(BIN))
+	@echo "Build complete: $(BIN)"
+
+# 运行
+run: $(BIN)
+ifdef IMG
+	$(BIN) --no-gui $(IMG)
+else
+	@echo "Usage: make -f Makefile.soc run IMG=<binary>"
+	@echo "Example: make -f Makefile.soc run IMG=../am-kernels/tests/cpu-tests/build/dummy-riscv32e-ysyxsoc.bin"
+endif
+
+clean:
+	rm -rf $(BUILD_DIR)
+
+help:
+	@echo "ysyxSoC NPC Makefile"
+	@echo "===================="
+	@echo ""
+	@echo "Targets:"
+	@echo "  soc       : Build multi-cycle version (default)"
+	@echo "  pipeline  : Build pipeline version with I-Cache"
+	@echo "  run       : Run simulation (requires IMG=<binary>)"
+	@echo "  clean     : Remove build artifacts"
+	@echo "  help      : Show this help"
+	@echo ""
+	@echo "Variables:"
+	@echo "  IMG       : Program binary to load into Flash"
+	@echo "  PIPELINE  : Set to 1 for pipeline version"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make -f Makefile.soc pipeline"
+	@echo "  make -f Makefile.soc run IMG=program.bin"

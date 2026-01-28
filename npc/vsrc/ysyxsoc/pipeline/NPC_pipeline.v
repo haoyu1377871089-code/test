@@ -196,6 +196,9 @@ module NPC_pipeline (
     reg        mem_wb_ecall;
     reg        mem_wb_mret;
     
+    // 用于防止 MEM/WB 重复锁存同一条指令
+    reg        mem_wb_latched;
+    
     // ========== WB 阶段信号 ==========
     wire        wbu_rf_wen;
     wire [4:0]  wbu_rf_waddr;
@@ -280,7 +283,11 @@ module NPC_pipeline (
     
     // IF 阶段状态机
     // if_discard: 当 flush 发生时，如果 ICache 正在处理请求，需要等待它返回并丢弃数据
+    // if_buffered: 当取指完成但 IF/ID 不能接收时，暂存数据
     reg if_discard;
+    reg if_buffered;
+    reg [31:0] if_buffered_pc;
+    reg [31:0] if_buffered_inst;
     
     always @(posedge clk or posedge rst) begin
         if (rst) begin
@@ -288,6 +295,9 @@ module NPC_pipeline (
             ifu_req <= 1'b0;
             if_waiting <= 1'b0;
             if_discard <= 1'b0;
+            if_buffered <= 1'b0;
+            if_buffered_pc <= 32'h0;
+            if_buffered_inst <= 32'h0;
             if_id_pc <= 32'h0;
             if_id_inst <= 32'h0;
             if_id_valid <= 1'b0;
@@ -298,6 +308,7 @@ module NPC_pipeline (
             // 冲刷处理
             if (flush_if) begin
                 if_id_valid <= 1'b0;
+                if_buffered <= 1'b0;  // 清除缓冲的数据
                 pc <= next_pc;
                 // 直接丢弃正在进行的取指，不等待 ICache 返回
                 // 这可能会导致 ICache 的一次 refill 被浪费，但不会影响正确性
@@ -312,23 +323,43 @@ module NPC_pipeline (
                     if_waiting <= 1'b0;
                     // 丢弃数据，不写入 if_id
                 end
-                // IF/ID 被消费时清除 valid
-                else if (if_id_consumed) begin
-                    if_id_valid <= 1'b0;
+                
+                // IF/ID 被消费时：尝试从缓冲区加载，或清除 valid
+                if (if_id_consumed) begin
+                    if (if_buffered) begin
+                        // 有缓冲数据，加载到 IF/ID
+                        if_id_pc <= if_buffered_pc;
+                        if_id_inst <= if_buffered_inst;
+                        if_id_valid <= 1'b1;
+                        if_buffered <= 1'b0;
+                    end else begin
+                        if_id_valid <= 1'b0;
+                    end
                 end
                 
-                // 取指完成时写入 IF/ID（正常情况，非 discard）
+                // 取指完成时处理
                 if (if_waiting && !if_discard && ifu_rvalid) begin
-                    if_id_pc <= pc;
-                    if_id_inst <= ifu_rdata;
-                    if_id_valid <= 1'b1;
                     if_waiting <= 1'b0;
+                    
+                    // 检查 IF/ID 是否可以接收
+                    // 可以接收的条件：IF/ID 为空，或正在被消费
+                    if (!if_id_valid || if_id_consumed) begin
+                        // 直接写入 IF/ID
+                        if_id_pc <= pc;
+                        if_id_inst <= ifu_rdata;
+                        if_id_valid <= 1'b1;
+                    end else begin
+                        // IF/ID 被占用且不能消费（stall），暂存到缓冲区
+                        if_buffered <= 1'b1;
+                        if_buffered_pc <= pc;
+                        if_buffered_inst <= ifu_rdata;
+                    end
                     pc <= pc + 32'd4;
                 end
                 
                 // 取指请求逻辑（脉冲请求，只维持一个周期）
-                // 只有当不在等待且不需要丢弃数据时才能发起新请求
-                if (!stall_if && !if_waiting && !if_discard) begin
+                // 只有当不在等待、不需要丢弃数据、没有缓冲数据时才能发起新请求
+                if (!stall_if && !if_waiting && !if_discard && !if_buffered) begin
                     // 需要发起新请求的条件：IF/ID 为空 或 IF/ID 正在被消费
                     if (!if_id_valid || if_id_consumed) begin
                         ifu_req <= 1'b1;
@@ -464,9 +495,11 @@ module NPC_pipeline (
     wire lsu_in_valid = ex_mem_valid;
     
     // MEM/WB 级间寄存器更新
+    // 使用 mem_wb_latched 来确保每条指令只被锁存一次
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             mem_wb_valid <= 1'b0;
+            mem_wb_latched <= 1'b0;
             mem_wb_pc <= 32'h0;
             mem_wb_inst <= 32'h0;
             mem_wb_result <= 32'h0;
@@ -480,8 +513,15 @@ module NPC_pipeline (
             mem_wb_ecall <= 1'b0;
             mem_wb_mret <= 1'b0;
         end else begin
-            if (lsu_out_valid) begin
+            // 当 lsu_out_valid 变为 0 时，清除 latched 标志
+            if (!lsu_out_valid) begin
+                mem_wb_latched <= 1'b0;
+            end
+            
+            // 只有当 lsu 有新的有效输出且尚未锁存时才更新 MEM/WB
+            if (lsu_out_valid && !mem_wb_latched) begin
                 mem_wb_valid <= 1'b1;
+                mem_wb_latched <= 1'b1;  // 标记已锁存
                 mem_wb_pc <= lsu_out_pc;
                 mem_wb_inst <= lsu_out_inst;
                 mem_wb_result <= lsu_out_result;
@@ -495,6 +535,7 @@ module NPC_pipeline (
                 mem_wb_ecall <= lsu_out_ecall;
                 mem_wb_mret <= lsu_out_mret;
             end else begin
+                // 没有新数据或已经锁存过，清除 valid
                 mem_wb_valid <= 1'b0;
             end
         end

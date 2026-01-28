@@ -149,10 +149,14 @@ module LSU_pipeline (
     assign mem_wdata = store_wdata;
     assign mem_wmask = store_wmask;
     
+    // 用于确保每条指令的 out_valid 只持续一个周期
+    reg out_valid_sent;
+    
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             state <= S_IDLE;
             out_valid <= 1'b0;
+            out_valid_sent <= 1'b0;
             mem_req <= 1'b0;
             mem_wen <= 1'b0;
             pc_reg <= 32'h0;
@@ -177,10 +181,17 @@ module LSU_pipeline (
         end else if (flush) begin
             state <= S_IDLE;
             out_valid <= 1'b0;
+            out_valid_sent <= 1'b0;
             mem_req <= 1'b0;
         end else begin
             case (state)
                 S_IDLE: begin
+                    // 首先处理 out_valid 的清零（在下一个周期清零）
+                    if (out_valid_sent) begin
+                        out_valid <= 1'b0;
+                        out_valid_sent <= 1'b0;
+                    end
+                    
                     if (in_valid && in_ready) begin
                         // 锁存输入
                         pc_reg <= in_pc;
@@ -215,9 +226,8 @@ module LSU_pipeline (
                             else
                                 result_reg <= in_alu_result;
                             out_valid <= 1'b1;
+                            out_valid_sent <= 1'b1;  // 标记需要在下一周期清零
                         end
-                    end else if (out_ready) begin
-                        out_valid <= 1'b0;
                     end
                 end
                 
@@ -236,7 +246,7 @@ module LSU_pipeline (
                 
                 S_DONE: begin
                     // 访存完成，输出结果
-                    if (!out_valid) begin
+                    if (!out_valid && !out_valid_sent) begin
                         // 第一次进入 S_DONE，设置输出
                         if (mem_ren_reg) begin
                             result_reg <= load_result;
@@ -244,10 +254,12 @@ module LSU_pipeline (
                             result_reg <= alu_result_reg;
                         end
                         out_valid <= 1'b1;
-                    end else if (out_ready) begin
-                        // 数据被下游消费，返回 IDLE
+                        out_valid_sent <= 1'b1;
+                    end else begin
+                        // 数据已发送，返回 IDLE
                         state <= S_IDLE;
                         out_valid <= 1'b0;
+                        out_valid_sent <= 1'b0;
                     end
                 end
                 
