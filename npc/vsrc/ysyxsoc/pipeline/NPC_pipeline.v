@@ -484,13 +484,14 @@ module NPC_pipeline (
                 id_ex_is_system <= idu_out_is_system;
                 id_ex_is_fence <= idu_out_is_fence;
                 id_ex_is_csr <= idu_out_is_csr;
-            end else if (!stall_id) begin
-                // ID 阶段不被阻塞但无有效输出，插入气泡
+            end else begin
+                // ID 阶段被阻塞或无有效输出，插入气泡
+                // 注意：当 stall_id=1 时，ID/EX 中当前指令已经流向 EX/MEM
+                // 所以需要清空 ID/EX 以防止重复执行
                 id_ex_valid <= 1'b0;
             end
-            // else: stall_id = 1，保持 ID/EX 不变，让当前指令继续执行
         end
-        // stall_ex = 1 时，保持 ID/EX 不变
+        // stall_ex = 1 时，保持 ID/EX 不变（EX 阶段被阻塞，不能接收新数据）
     end
     
     // ========== EX 阶段逻辑 ==========
