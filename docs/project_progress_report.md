@@ -1,6 +1,6 @@
 # NPC 流水线处理器项目进展报告
 
-> 更新日期：2026-01-28
+> 更新日期：2026-01-28 (更新: 修复流水线问题 #4 和 #5)
 
 ## 一、项目概述
 
@@ -146,15 +146,67 @@ end else if (out_valid && out_ready) begin
 end
 ```
 
-### 4.4 待解决问题
+### 4.4 已修复问题 (2026-01-28 晚间更新)
 
-1. **store/load 指令被跳过**
-   - 需检查 flush 信号是否错误地冲刷了 MEM 阶段的指令
-   - 检查 EX/MEM 寄存器在 flush 时的处理
+**问题 #4 修复: 分支指令重复提交**
 
-2. **分支重复提交**
-   - MEM/WB 的 valid 信号清零时序需要与 LSU out_valid 协调
-   - 可能需要在 MEM/WB 层级增加握手确认机制
+根因：MEM/WB 级间寄存器在 `lsu_out_valid=1` 时无条件更新，未检查 WBU 是否准备好接收。
+
+修复方案：
+```verilog
+// MEM/WB 只在 WBU 准备好时更新
+always @(posedge clk or posedge rst) begin
+    if (rst) begin
+        mem_wb_valid <= 1'b0;
+    end else begin
+        if (wbu_in_ready) begin  // 新增检查
+            if (lsu_out_valid) begin
+                mem_wb_valid <= 1'b1;
+                // ... 锁存数据
+            end else begin
+                mem_wb_valid <= 1'b0;
+            end
+        end
+    end
+end
+```
+
+**问题 #5 修复: store/load 指令被跳过**
+
+根因：当取指完成但 IF/ID 被阻塞时，取指结果会覆盖 IF/ID 中未消费的指令。
+
+修复方案：添加 pending 寄存器来缓存取指结果
+```verilog
+reg        if_pending_valid;
+reg [31:0] if_pending_pc;
+reg [31:0] if_pending_inst;
+
+// 取指完成时处理
+if (if_waiting && !if_discard && ifu_rvalid) begin
+    if (!if_id_valid || if_id_consumed) begin
+        // IF/ID 可接收，直接写入
+        if_id_pc <= pc;
+        if_id_inst <= ifu_rdata;
+        if_id_valid <= 1'b1;
+    end else begin
+        // IF/ID 被阻塞，存入 pending
+        if_pending_pc <= pc;
+        if_pending_inst <= ifu_rdata;
+        if_pending_valid <= 1'b1;
+    end
+end
+```
+
+**LSU out_ready 修复**
+
+修改 LSU 的 `out_ready` 从硬连线 `1'b1` 改为连接 `wbu_in_ready`，支持背压。
+
+### 4.5 待解决问题
+
+1. **构建环境配置**
+   - D-stage 的 ysyxSoCFull.v 使用简化 CPU 接口，与流水线版本不兼容
+   - 需要生成匹配 AXI4 接口的 ysyxSoCFull.v
+   - 或者修改 ysyx_pipeline_top.v 适配 D-stage 接口
 
 ---
 
