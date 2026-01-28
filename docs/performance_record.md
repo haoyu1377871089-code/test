@@ -43,6 +43,13 @@
 ||----------|--------|------|------------|--------|-----|-----|
 || 2026-01-27 | 5974dd3 | microbench (test) + 16B CacheLine + AXI4 Burst (**99.67% hit**) | 30,786,095 | 550,105 | 0.018 | 55.96 |
 
+### I-Cache + D-Cache (双缓存版本)
+
+|| 测试时间 | Commit | 说明 | 仿真周期数 | 指令数 | IPC | CPI |
+||----------|--------|------|------------|--------|-----|-----|
+|| 2026-01-28 | WIP | 基线（仅 I-Cache）| 30,593,144 | 549,606 | 0.018 | 55.66 |
+|| 2026-01-28 | WIP | I-Cache + D-Cache (**96.65% read hit**) | 24,867,697 | 549,699 | 0.022 | **45.23** |
+
 ### 详细性能计数器 (16B Cache Line + AXI4 Burst 版本)
 
 #### EXU 统计
@@ -106,6 +113,7 @@
 || 2026-01-25 | fe89758 | 基线版本 | - | - | 单周期NPC, microbench test CPI≈951 |
 || 2026-01-25 | WIP | I-Cache 修复并启用 | 522M → 30M (**17.18x**) | 0.001 → 0.018 | CPI 从 951 降至 55 |
 || 2026-01-27 | 5974dd3 | 16B CacheLine + AXI4 Burst | 30.4M → 30.8M | - | Hit Rate 98.78% → 99.67%, Miss 6690 → 1786 (**3.74x fewer**) |
+|| 2026-01-28 | WIP | D-Cache 启用 | 30.6M → 24.9M (**18.7% 减少**) | 0.018 → 0.022 | CPI 55.66 → 45.23 (**18.7% 改善**) |
 
 ## I-Cache 优化效果对比
 
@@ -178,6 +186,64 @@ VERILATOR_CFLAGS += ... +define+SIMULATION +define+ENABLE_ICACHE
 - **问题**: 写操作完成时设置的 `rvalid_out=1` 被 else 分支的 `rvalid_out=0` 覆盖
 - **修复**: 移除冲突的 else 分支
 
+## D-Cache 优化效果分析 (2026-01-28)
+
+### 基线 vs D-Cache 启用版本对比
+
+|| 指标 | 仅 I-Cache | I-Cache + D-Cache | 变化 |
+||------|------------|-------------------|------|
+|| Total Cycles | 30,593,144 | 24,867,697 | **-18.7%** |
+|| CPI | 55.66 | **45.23** | **-18.7%** |
+|| WAIT_LSU 占比 | 65% | 56% | -9% |
+|| Load 延迟 | 185.75 cycles | 170.35 cycles | -8.3% |
+|| Store 延迟 | 107.22 cycles | 107.22 cycles | 不变 |
+
+### D-Cache 详细统计
+
+|| 项目 | 数值 |
+||------|------|
+|| Read Hit Count | 29,471 |
+|| Read Miss Count | 1,019 |
+|| Write Hit Count | 8,744 |
+|| Write Miss Count | 21,014 |
+|| Total Accesses | 129,047 |
+|| **Read Hit Rate** | **96.65%** |
+|| Total Cycles | 14,044,328 |
+|| Refill Cycles | 952,765 |
+|| Write Cycles | 5,913,378 |
+|| Avg Refill Latency | 935 cycles |
+|| AMAT | 108.83 cycles |
+
+### 分析
+
+1. **周期数大幅减少**: 从 30.6M 降至 24.9M，减少 **572 万周期 (18.7%)**
+2. **CPI 显著改善**: 从 55.66 降至 45.23，改善 **18.7%**
+3. **Read Hit Rate 优秀**: 96.65% 的读命中率，减少了大量 PSRAM 访问
+4. **Write-through 策略**: 写操作延迟不变，因为所有写都直接写穿到内存
+5. **WAIT_LSU 占比下降**: 从 65% 降至 56%，仍是主要瓶颈，但有所改善
+
+### D-Cache 设计参数
+
+|| 参数 | 数值 | 说明 |
+||------|------|------|
+|| 总大小 | 4 KB | 与 I-Cache 相同 |
+|| 关联度 | 2-way | 降低冲突 miss |
+|| 块大小 | 16 Bytes | 4 words，启用 AXI4 burst |
+|| 写策略 | Write-through | 所有写立即写入内存 |
+|| 分配策略 | No-write-allocate | 写 miss 不填充 cache |
+|| 可缓存区域 | PSRAM (0x80000000) | I/O 设备自动 bypass |
+
+### 启用方法
+
+在 `npc/Makefile.soc` 中默认启用，可通过 `NO_DCACHE=1` 禁用:
+```makefile
+# 禁用 D-Cache
+make -f Makefile.soc NO_DCACHE=1
+
+# 启用 D-Cache（默认）
+make -f Makefile.soc
+```
+
 ## 注意事项
 
 1. **APB Delayer 参数**: R_TIMES_S=1280 对应 CPU频率≈500MHz, 设备频率≈100MHz
@@ -186,3 +252,4 @@ VERILATOR_CFLAGS += ... +define+SIMULATION +define+ENABLE_ICACHE
 4. **一致性检查**: 
    - IFU Fetch ~= Retired Instrs (允许差1，因为 ebreak 时有预取) - 已修复为 PASS
    - Sum of Instr Types = Retired (应该 PASS)
+5. **D-Cache 启用后**: EXU Load ≠ LSU Load 是正常的，因为 D-Cache hit 不触发 LSU 访存
