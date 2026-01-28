@@ -1,7 +1,15 @@
-include $(AM_HOME)/scripts/isa/riscv.mk
 include $(AM_HOME)/scripts/platform/ysyxsoc.mk
+
+# 使用裸机工具链，因为 ilp32e ABI 不被 Linux glibc 支持
+CROSS_COMPILE := riscv64-unknown-elf-
+
+# 注意：不要 include riscv.mk，因为它设置了 -melf64lriscv，对 rv32e 不正确
+# 直接设置 rv32e 需要的编译和链接选项
+ARCH_H := arch/riscv.h
 CFLAGS  += -DISA_H=\"riscv/riscv.h\"
-COMMON_CFLAGS += -march=rv32e_zicsr -mabi=ilp32e
+COMMON_CFLAGS := -fno-pic -march=rv32e_zicsr_zifencei -mabi=ilp32e -mcmodel=medany -mstrict-align
+CFLAGS        += $(COMMON_CFLAGS) -static
+ASFLAGS       += $(COMMON_CFLAGS) -O0
 LDFLAGS       += -melf32lriscv
 CFLAGS        += -I$(AM_HOME)/am/src/riscv/ysyxsoc/include
 
