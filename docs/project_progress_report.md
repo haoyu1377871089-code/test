@@ -136,16 +136,24 @@ assign stall_mem = mem_busy;  // MEM 阶段忙时保持 EX/MEM 寄存器不变
 
 **验证结果**：
 
-- `dummy` 测试: ✅ 通过 (HIT GOOD TRAP)
-- `microbenchmark` 测试: ✅ 通过
-- `add` 测试: ✅ 通过
-- `fib` 测试: ✅ 通过
-- `load-store` 测试: ✅ 通过
-- `recursion` 测试: ✅ 通过
+- 全部 38 个 CPU 测试通过 (100%)
+- `microbenchmark` 测试通过
+- 当前 CPI: ~33.84
+
+完整测试列表：
+```
+[PASS] leap-year, pascal, mul-longlong, goldbach, sub-longlong,
+       recursion, to-lower-case, quick-sort, div, mersenne,
+       hello-str, matrix-mul, bit, movsx, fact, min3, switch,
+       hello, sum, if-else, select-sort, dummy, add, crc32,
+       load-store, string, global-var-test, wanshu, max, fib,
+       mem-test, shift, prime, unalign, add-longlong, mov-c,
+       bubble-sort, shuixianhua
+```
 
 ### 4.4 当前状态
 
-所有主要问题已修复。流水线处理器能够正确执行测试程序。
+所有主要问题已修复。流水线处理器能够正确执行所有 CPU 测试程序和 microbenchmark。
 
 ---
 
