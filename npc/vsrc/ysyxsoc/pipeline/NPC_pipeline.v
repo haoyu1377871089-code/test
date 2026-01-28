@@ -249,25 +249,7 @@ module NPC_pipeline (
     
     wire raw_hazard = raw_ex_rs1 || raw_ex_rs2 || raw_mem_rs1 || raw_mem_rs2 || raw_wb_rs1 || raw_wb_rs2;
     
-`ifdef SIMULATION
-    reg [31:0] raw_dbg_cycle;
-    always @(posedge clk or posedge rst) begin
-        if (rst) raw_dbg_cycle <= 0;
-        else raw_dbg_cycle <= raw_dbg_cycle + 1;
-    end
-    
-    // Debug pipeline stages for first few instructions
-    always @(posedge clk) begin
-        if (raw_dbg_cycle >= 3115 && raw_dbg_cycle <= 3130) begin
-            $display("[PIPE@%0d] stall_id=%b raw_hazard=%b | ex_valid=%b mem_valid=%b wb_valid=%b",
-                raw_dbg_cycle, stall_id, raw_hazard, id_ex_valid, ex_mem_valid, mem_wb_valid);
-            $display("         ex_rd=%d ex_wen=%b | mem_rd=%d mem_wen=%b | wb_rd=%d wb_wen=%b",
-                ex_rd, id_ex_reg_wen, mem_rd, ex_mem_reg_wen, wb_rd, mem_wb_reg_wen);
-            $display("         raw_ex=%b raw_mem=%b raw_wb=%b",
-                raw_ex_rs1, raw_mem_rs1, raw_wb_rs1);
-        end
-    end
-`endif
+// Debug code removed for performance
     
     // 暂停信号
     // stall_if: IF 阶段只在 MEM busy 或下游阻塞时暂停
