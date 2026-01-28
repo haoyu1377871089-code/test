@@ -694,10 +694,7 @@ COMPILER_RT_ABI si_int __ctzsi2(si_int a) {
   return r + ((2 - (x >> 1)) & -((x & 1) == 0));
 }
 
-typedef int si_int;
-typedef long long di_int;
-typedef unsigned su_int;
-#define CHAR_BIT __CHAR_BIT__
+/* Use CHAR_BIT from limits.h */
 
 
 si_int __ctzdi2(di_int a) {
