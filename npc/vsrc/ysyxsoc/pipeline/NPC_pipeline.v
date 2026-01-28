@@ -196,8 +196,7 @@ module NPC_pipeline (
     reg        mem_wb_ecall;
     reg        mem_wb_mret;
     
-    // 用于防止 MEM/WB 重复锁存同一条指令
-    reg        mem_wb_latched;
+    // (removed mem_wb_latched, using standard valid/ready handshake)
     
     // ========== WB 阶段信号 ==========
     wire        wbu_rf_wen;
@@ -238,11 +237,13 @@ module NPC_pipeline (
     // EX 阶段的转发数据：来自 EXU 的 ALU 结果
     wire [31:0] ex_fwd_data = exu_out_alu_result;
     
-    // MEM 阶段的目标寄存器
+    // MEM 阶段的目标寄存器（用于冒险检测）
     wire [4:0] mem_rd = ex_mem_rd;
     wire mem_writes_reg = ex_mem_valid && ex_mem_reg_wen && (mem_rd != 5'b0);
     // MEM 阶段可以转发的条件：LSU 输出有效
-    wire mem_can_forward = lsu_out_valid && ex_mem_reg_wen && (mem_rd != 5'b0);
+    // 注意：使用 LSU 输出的 rd，因为 LSU 可能处理多个周期，ex_mem_rd 可能已经变了
+    wire [4:0] lsu_rd_out = lsu_out_rd;
+    wire mem_can_forward = lsu_out_valid && lsu_out_reg_wen && (lsu_rd_out != 5'b0);
     // MEM 阶段的转发数据：来自 LSU 的输出结果
     wire [31:0] mem_fwd_data = lsu_out_result;
     
@@ -264,7 +265,7 @@ module NPC_pipeline (
     // ========== 转发逻辑（优先级：EX > MEM > WB，最年轻优先）==========
     // RS1 转发
     wire fwd_ex_rs1 = id_uses_rs1 && ex_can_forward && (id_rs1 == ex_rd);
-    wire fwd_mem_rs1 = id_uses_rs1 && mem_can_forward && (id_rs1 == mem_rd) && !fwd_ex_rs1;
+    wire fwd_mem_rs1 = id_uses_rs1 && mem_can_forward && (id_rs1 == lsu_rd_out) && !fwd_ex_rs1;
     wire fwd_wb_wbu_rs1 = id_uses_rs1 && wb_can_forward_wbu && (id_rs1 == wbu_rd) && !fwd_ex_rs1 && !fwd_mem_rs1;
     wire fwd_wb_pending_rs1 = id_uses_rs1 && wb_can_forward_pending && (id_rs1 == wb_rd) && !fwd_ex_rs1 && !fwd_mem_rs1 && !fwd_wb_wbu_rs1;
     
@@ -276,7 +277,7 @@ module NPC_pipeline (
     
     // RS2 转发
     wire fwd_ex_rs2 = id_uses_rs2 && ex_can_forward && (id_rs2 == ex_rd);
-    wire fwd_mem_rs2 = id_uses_rs2 && mem_can_forward && (id_rs2 == mem_rd) && !fwd_ex_rs2;
+    wire fwd_mem_rs2 = id_uses_rs2 && mem_can_forward && (id_rs2 == lsu_rd_out) && !fwd_ex_rs2;
     wire fwd_wb_wbu_rs2 = id_uses_rs2 && wb_can_forward_wbu && (id_rs2 == wbu_rd) && !fwd_ex_rs2 && !fwd_mem_rs2;
     wire fwd_wb_pending_rs2 = id_uses_rs2 && wb_can_forward_pending && (id_rs2 == wb_rd) && !fwd_ex_rs2 && !fwd_mem_rs2 && !fwd_wb_wbu_rs2;
     
@@ -484,11 +485,11 @@ module NPC_pipeline (
                 id_ex_is_system <= idu_out_is_system;
                 id_ex_is_fence <= idu_out_is_fence;
                 id_ex_is_csr <= idu_out_is_csr;
-            end else if (!stall_id) begin
-                // ID 阶段不被阻塞但无有效输出，插入气泡
+            end else begin
+                // ID 阶段被阻塞（RAW冒险）或无有效输出，插入气泡
+                // 关键：即使 stall_id=1，EX 阶段也要接收气泡，否则当前指令会被重复执行
                 id_ex_valid <= 1'b0;
             end
-            // else: stall_id = 1，保持 ID/EX 不变，让当前指令继续执行
         end
         // stall_ex = 1 时，保持 ID/EX 不变
     end
@@ -553,11 +554,10 @@ module NPC_pipeline (
     wire lsu_in_valid = ex_mem_valid;
     
     // MEM/WB 级间寄存器更新
-    // 关键：mem_wb_valid 必须保持有效直到 WBU 接收数据
+    // 使用标准 valid/ready 握手协议
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             mem_wb_valid <= 1'b0;
-            mem_wb_latched <= 1'b0;
             mem_wb_pc <= 32'h0;
             mem_wb_inst <= 32'h0;
             mem_wb_result <= 32'h0;
@@ -574,18 +574,12 @@ module NPC_pipeline (
             // 当 WBU 接收了数据时，清除 valid
             if (mem_wb_valid && wbu_in_ready) begin
                 mem_wb_valid <= 1'b0;
-                mem_wb_latched <= 1'b0;  // 允许锁存新数据
             end
             
-            // 当 lsu_out_valid 变为 0 时，清除 latched 标志（但保持 mem_wb_valid）
-            if (!lsu_out_valid && !mem_wb_valid) begin
-                mem_wb_latched <= 1'b0;
-            end
-            
-            // 只有当 lsu 有新的有效输出且尚未锁存且 MEM/WB 空闲时才更新
-            if (lsu_out_valid && !mem_wb_latched && !mem_wb_valid) begin
+            // 当 lsu 有新的有效输出且 MEM/WB 空闲时锁存数据
+            // 注意：如果 WBU 在同一周期消费了旧数据，可以立即锁存新数据
+            if (lsu_out_valid && (!mem_wb_valid || (mem_wb_valid && wbu_in_ready))) begin
                 mem_wb_valid <= 1'b1;
-                mem_wb_latched <= 1'b1;  // 标记已锁存
                 mem_wb_pc <= lsu_out_pc;
                 mem_wb_inst <= lsu_out_inst;
                 mem_wb_result <= lsu_out_result;
@@ -730,7 +724,7 @@ module NPC_pipeline (
         .in_ecall    (ex_mem_ecall),
         .in_mret     (ex_mem_mret),
         .out_valid   (lsu_out_valid),
-        .out_ready   (!mem_wb_valid),  // MEM/WB 空闲时可以接收
+        .out_ready   (!mem_wb_valid || (mem_wb_valid && wbu_in_ready)),  // MEM/WB 空闲或 WBU 正在消费时可以接收
         .out_pc      (lsu_out_pc),
         .out_inst    (lsu_out_inst),
         .out_result  (lsu_out_result),

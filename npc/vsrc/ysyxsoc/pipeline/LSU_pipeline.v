@@ -149,14 +149,12 @@ module LSU_pipeline (
     assign mem_wdata = store_wdata;
     assign mem_wmask = store_wmask;
     
-    // 用于确保每条指令的 out_valid 只持续一个周期
-    reg out_valid_sent;
+    // 标准 valid/ready 握手：out_valid 保持直到 out_ready && out_valid
     
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             state <= S_IDLE;
             out_valid <= 1'b0;
-            out_valid_sent <= 1'b0;
             mem_req <= 1'b0;
             mem_wen <= 1'b0;
             pc_reg <= 32'h0;
@@ -181,17 +179,16 @@ module LSU_pipeline (
         end else if (flush) begin
             state <= S_IDLE;
             out_valid <= 1'b0;
-            out_valid_sent <= 1'b0;
             mem_req <= 1'b0;
         end else begin
             case (state)
                 S_IDLE: begin
-                    // 首先处理 out_valid 的清零（在下一个周期清零）
-                    if (out_valid_sent) begin
+                    // 如果下游准备好了，清零 out_valid
+                    if (out_valid && out_ready) begin
                         out_valid <= 1'b0;
-                        out_valid_sent <= 1'b0;
                     end
                     
+                    // 只有在下游准备好且没有待处理数据时才接收新指令
                     if (in_valid && in_ready) begin
                         // 锁存输入
                         pc_reg <= in_pc;
@@ -217,7 +214,6 @@ module LSU_pipeline (
                             state <= S_MEM_REQ;
                             mem_req <= 1'b1;
                             mem_wen <= in_mem_wen;
-                            out_valid <= 1'b0;
                         end else begin
                             // 不需要访存，直接传递
                             // 选择写回数据
@@ -226,7 +222,6 @@ module LSU_pipeline (
                             else
                                 result_reg <= in_alu_result;
                             out_valid <= 1'b1;
-                            out_valid_sent <= 1'b1;  // 标记需要在下一周期清零
                         end
                     end
                 end
@@ -240,26 +235,22 @@ module LSU_pipeline (
                 S_MEM_WAIT: begin
                     if (mem_rvalid) begin
                         mem_result <= mem_rdata;
-                        state <= S_DONE;
-                    end
-                end
-                
-                S_DONE: begin
-                    // 访存完成，输出结果
-                    if (!out_valid && !out_valid_sent) begin
-                        // 第一次进入 S_DONE，设置输出
+                        // 访存完成，设置输出
                         if (mem_ren_reg) begin
                             result_reg <= load_result;
                         end else begin
                             result_reg <= alu_result_reg;
                         end
                         out_valid <= 1'b1;
-                        out_valid_sent <= 1'b1;
-                    end else begin
-                        // 数据已发送，返回 IDLE
-                        state <= S_IDLE;
+                        state <= S_DONE;
+                    end
+                end
+                
+                S_DONE: begin
+                    // 等待下游消费数据
+                    if (out_valid && out_ready) begin
                         out_valid <= 1'b0;
-                        out_valid_sent <= 1'b0;
+                        state <= S_IDLE;
                     end
                 end
                 
