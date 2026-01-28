@@ -218,6 +218,7 @@ module NPC_pipeline (
     
     // ========== RAW 数据冒险检测 ==========
     // 检测 ID 阶段源寄存器与后续阶段目标寄存器的冲突
+    // 关键：需要同时检测流水线寄存器中的数据和 WBU 正在写回的数据
     
     // ID 阶段的源寄存器（来自 IDU 输出）
     wire [4:0] id_rs1 = idu_out_rs1;
@@ -225,36 +226,53 @@ module NPC_pipeline (
     wire id_uses_rs1 = idu_out_valid && (id_rs1 != 5'b0);  // x0 不需要检测
     wire id_uses_rs2 = idu_out_valid && (id_rs2 != 5'b0);
     
-    // EX 阶段的目标寄存器
+    // EX 阶段的目标寄存器（ID/EX 级间寄存器）
     wire [4:0] ex_rd = id_ex_rd;
     wire ex_writes_reg = id_ex_valid && id_ex_reg_wen && (ex_rd != 5'b0);
     
-    // MEM 阶段的目标寄存器
+    // MEM 阶段的目标寄存器（EX/MEM 级间寄存器）
     wire [4:0] mem_rd = ex_mem_rd;
     wire mem_writes_reg = ex_mem_valid && ex_mem_reg_wen && (mem_rd != 5'b0);
     
-    // WB 阶段的目标寄存器（已经在当前周期写入寄存器堆，不会冲突）
-    // 但 MEM/WB 寄存器中的数据还没写入，需要检测
-    wire [4:0] wb_rd = mem_wb_rd;
-    wire wb_writes_reg = mem_wb_valid && mem_wb_reg_wen && (wb_rd != 5'b0);
+    // WB 阶段的目标寄存器 - 需要检测两种情况：
+    // 1. MEM/WB 寄存器中待写回的数据（WBU 还没开始处理）
+    // 2. WBU 正在写回的数据（WBU 在 S_COMMIT 状态）
+    
+    // 情况 1: MEM/WB 寄存器中有待写回的数据
+    wire [4:0] pending_wb_rd = mem_wb_rd;
+    wire pending_wb_writes = mem_wb_valid && mem_wb_reg_wen && (pending_wb_rd != 5'b0);
+    
+    // 情况 2: WBU 正在执行写回（使用 WBU 的实际写入信号）
+    wire [4:0] wbu_wr_rd = wbu_rf_waddr;
+    wire wbu_writing = wbu_rf_wen && (wbu_wr_rd != 5'b0);
     
     // RAW 冒险检测
     wire raw_ex_rs1 = id_uses_rs1 && ex_writes_reg && (id_rs1 == ex_rd);
     wire raw_ex_rs2 = id_uses_rs2 && ex_writes_reg && (id_rs2 == ex_rd);
     wire raw_mem_rs1 = id_uses_rs1 && mem_writes_reg && (id_rs1 == mem_rd);
     wire raw_mem_rs2 = id_uses_rs2 && mem_writes_reg && (id_rs2 == mem_rd);
-    wire raw_wb_rs1 = id_uses_rs1 && wb_writes_reg && (id_rs1 == wb_rd);
-    wire raw_wb_rs2 = id_uses_rs2 && wb_writes_reg && (id_rs2 == wb_rd);
     
-    wire raw_hazard = raw_ex_rs1 || raw_ex_rs2 || raw_mem_rs1 || raw_mem_rs2 || raw_wb_rs1 || raw_wb_rs2;
+    // WB 阶段冒险：检测两种情况
+    wire raw_pending_wb_rs1 = id_uses_rs1 && pending_wb_writes && (id_rs1 == pending_wb_rd);
+    wire raw_pending_wb_rs2 = id_uses_rs2 && pending_wb_writes && (id_rs2 == pending_wb_rd);
+    wire raw_wbu_rs1 = id_uses_rs1 && wbu_writing && (id_rs1 == wbu_wr_rd);
+    wire raw_wbu_rs2 = id_uses_rs2 && wbu_writing && (id_rs2 == wbu_wr_rd);
+    
+    wire raw_hazard = raw_ex_rs1 || raw_ex_rs2 || 
+                      raw_mem_rs1 || raw_mem_rs2 || 
+                      raw_pending_wb_rs1 || raw_pending_wb_rs2 ||
+                      raw_wbu_rs1 || raw_wbu_rs2;
     
     // 暂停信号
-    // stall_if: IF 阶段只在 MEM busy 或下游阻塞时暂停
-    // 注意: if_waiting 不应该阻塞 IF 自己，它只是等待取指完成的状态
-    assign stall_if  = mem_busy || stall_id || raw_hazard;
-    assign stall_id  = mem_busy || raw_hazard;  // RAW 冒险时阻塞 ID
+    // 自底向上传播阻塞：MEM → EX → ID → IF
+    // stall_mem: MEM 阶段本身不产生阻塞（LSU 内部有状态机）
+    // stall_ex:  当 MEM 阶段忙时阻塞 EX（防止覆盖正在访存的指令）
+    // stall_id:  当 MEM 忙或 RAW 冒险时阻塞 ID
+    // stall_if:  当 ID 阶段阻塞时阻塞 IF（防止 IF/ID 溢出）
+    assign stall_mem = 1'b0;
     assign stall_ex  = mem_busy;
-    assign stall_mem = 1'b0;  // MEM 阶段不暂停
+    assign stall_id  = mem_busy || raw_hazard;
+    assign stall_if  = stall_id;  // IF 与 ID 同步阻塞
     
     // 控制冒险冲刷: 分支/跳转/异常时冲刷流水线
     wire branch_flush = exu_branch_taken || exu_is_jump;
@@ -346,6 +364,11 @@ module NPC_pipeline (
     wire idu_in_ready;
     
     // ID/EX 级间寄存器更新
+    // 关键逻辑：
+    // 1. flush_id: 清零（分支/跳转/异常）
+    // 2. stall_ex: 保持原值（MEM 阶段忙，EX 的指令不能前进）
+    // 3. stall_id (RAW 冒险): 插入气泡（向 EX 传递无效指令）
+    // 4. 正常情况: 传递 ID 阶段的指令
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             id_ex_valid <= 1'b0;
@@ -372,9 +395,15 @@ module NPC_pipeline (
             id_ex_is_fence <= 1'b0;
             id_ex_is_csr <= 1'b0;
         end else if (flush_id) begin
+            // 分支/跳转时冲刷
             id_ex_valid <= 1'b0;
-        end else if (!stall_id) begin  // 使用 stall_id 而不是 stall_ex，因为 stall_id 包含 RAW hazard
-            if (idu_out_valid) begin
+        end else if (stall_ex) begin
+            // MEM 阶段忙时，EX 阶段被阻塞，ID/EX 保持原值
+            // （EX 阶段的指令还没进入 MEM，不能覆盖）
+        end else begin
+            // EX 阶段不阻塞，可以更新 ID/EX
+            if (!stall_id && idu_out_valid) begin
+                // 正常传递：ID 阶段有有效指令且没有 RAW 冒险
                 id_ex_valid <= 1'b1;
                 id_ex_pc <= idu_out_pc;
                 id_ex_inst <= idu_out_inst;
@@ -399,6 +428,8 @@ module NPC_pipeline (
                 id_ex_is_fence <= idu_out_is_fence;
                 id_ex_is_csr <= idu_out_is_csr;
             end else begin
+                // RAW 冒险或 ID 阶段无效时，插入气泡
+                // 这样 EX 阶段的指令不会被重复执行
                 id_ex_valid <= 1'b0;
             end
         end
@@ -410,6 +441,10 @@ module NPC_pipeline (
     wire exu_in_valid = id_ex_valid && !flush_ex;
     
     // EX/MEM 级间寄存器更新
+    // 关键逻辑：
+    // 1. flush_ex: 清零（异常）
+    // 2. stall_ex: 保持原值（MEM 阶段忙，EX 的指令不能前进）
+    // 3. 正常情况: 传递 EX 阶段的结果，或插入气泡
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             ex_mem_valid <= 1'b0;
@@ -431,8 +466,13 @@ module NPC_pipeline (
             ex_mem_ecall <= 1'b0;
             ex_mem_mret <= 1'b0;
         end else if (flush_ex) begin
+            // 异常时冲刷
             ex_mem_valid <= 1'b0;
-        end else if (!stall_mem) begin
+        end else if (stall_ex) begin
+            // MEM 阶段忙时，EX 阶段被阻塞，EX/MEM 保持原值
+            // （MEM 阶段的指令还在访存，不能被覆盖）
+        end else begin
+            // MEM 阶段不阻塞，可以更新 EX/MEM
             if (exu_out_valid) begin
                 ex_mem_valid <= 1'b1;
                 ex_mem_pc <= exu_out_pc;
@@ -453,6 +493,7 @@ module NPC_pipeline (
                 ex_mem_ecall <= exu_ecall;
                 ex_mem_mret <= exu_mret;
             end else begin
+                // EX 阶段没有有效指令，插入气泡
                 ex_mem_valid <= 1'b0;
             end
         end
