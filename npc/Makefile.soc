@@ -51,18 +51,7 @@ LDFLAGS += -ldl -lrt -lpthread
 $(shell mkdir -p $(BUILD_DIR))
 
 $(YSYXSOC_GEN_V): $(YSYXSOC_V)
-	@python3 - <<'PY'
-	import pathlib
-	src = pathlib.Path("$<")
-	dst = pathlib.Path("$@")
-	marker = "firrtl_black_box_resource_files.f"
-	out = []
-	for line in src.read_text().splitlines():
-	    if marker in line:
-	        break
-	    out.append(line)
-	dst.write_text("\n".join(out) + "\n")
-	PY
+	@python3 -c "import pathlib,itertools; src=pathlib.Path(\"$<\"); dst=pathlib.Path(\"$@\"); marker=\"firrtl_black_box_resource_files.f\"; lines=src.read_text().splitlines(); out=list(itertools.takewhile(lambda l: marker not in l, lines)); dst.write_text(\"\\n\".join(out) + \"\\n\")"
 
 soc: VERILATOR_DEFINES = $(SOC_DEFINES) $(EXTRA_DEFINES)
 soc: $(BIN)
