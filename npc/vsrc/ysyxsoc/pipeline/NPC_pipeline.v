@@ -233,18 +233,22 @@ module NPC_pipeline (
     wire [4:0] mem_rd = ex_mem_rd;
     wire mem_writes_reg = ex_mem_valid && ex_mem_reg_wen && (mem_rd != 5'b0);
     
-    // WB 阶段的目标寄存器（已经在当前周期写入寄存器堆，不会冲突）
-    // 但 MEM/WB 寄存器中的数据还没写入，需要检测
-    wire [4:0] wb_rd = mem_wb_rd;
-    wire wb_writes_reg = mem_wb_valid && mem_wb_reg_wen && (wb_rd != 5'b0);
+    // WB 阶段的目标寄存器
+    // 使用 WBU 的写入信号，因为 WBU 接收数据后需额外周期才写入寄存器堆
+    wire wb_writes_reg = wbu_rf_wen && (wbu_rf_waddr != 5'b0);
+    // MEM/WB 寄存器中待写入的数据也需要检测
+    wire pending_wb_writes = mem_wb_valid && mem_wb_reg_wen && (mem_wb_rd != 5'b0);
     
     // RAW 冒险检测
     wire raw_ex_rs1 = id_uses_rs1 && ex_writes_reg && (id_rs1 == ex_rd);
     wire raw_ex_rs2 = id_uses_rs2 && ex_writes_reg && (id_rs2 == ex_rd);
     wire raw_mem_rs1 = id_uses_rs1 && mem_writes_reg && (id_rs1 == mem_rd);
     wire raw_mem_rs2 = id_uses_rs2 && mem_writes_reg && (id_rs2 == mem_rd);
-    wire raw_wb_rs1 = id_uses_rs1 && wb_writes_reg && (id_rs1 == wb_rd);
-    wire raw_wb_rs2 = id_uses_rs2 && wb_writes_reg && (id_rs2 == wb_rd);
+    // WB 阶段的 RAW 冒险：检测当前周期写入和待写入的数据
+    wire raw_wb_rs1 = id_uses_rs1 && ((wb_writes_reg && (id_rs1 == wbu_rf_waddr)) || 
+                                      (pending_wb_writes && (id_rs1 == mem_wb_rd)));
+    wire raw_wb_rs2 = id_uses_rs2 && ((wb_writes_reg && (id_rs2 == wbu_rf_waddr)) || 
+                                      (pending_wb_writes && (id_rs2 == mem_wb_rd)));
     
     wire raw_hazard = raw_ex_rs1 || raw_ex_rs2 || raw_mem_rs1 || raw_mem_rs2 || raw_wb_rs1 || raw_wb_rs2;
     
