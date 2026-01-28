@@ -103,58 +103,49 @@ wire raw_wb_rs1 = id_uses_rs1 && ((wb_writes_reg && (id_rs1 == wbu_rf_waddr)) ||
 - 程序能继续执行，进入 `uart_init`
 - 但陷入 `uart_init` 的延迟循环
 
-### 4.3 新发现问题 (2026-01-28 深入调试)
+### 4.3 已修复问题 (2026-01-28)
 
-**问题 #4：分支指令重复提交**
+**问题 #4：分支指令重复提交** - ✅ 已解决
 
-从调试日志发现 branch 指令被提交两次：
-```
-[COMMIT@17947] pc=3000016c inst=fef758e3 ...
-[COMMIT@17949] pc=3000016c inst=fef758e3 ...
-```
+从调试日志发现 branch 指令被提交两次，此问题在修复问题 #5 后得到解决。
 
-**问题 #5：store 指令被跳过**
+**问题 #5：store/load 指令被跳过** - ✅ 已修复
 
-`uart_init` 延迟循环代码：
-```asm
-3000015c:  lw   a5, 0(sp)      # load i
-30000160:  addi a5, a5, 1      # i++
-30000164:  sw   a5, 0(sp)      # store i  <-- 被跳过！
-30000168:  lw   a5, 0(sp)      # load i   <-- 被跳过！
-3000016c:  bge  a4, a5, ...    # branch
-```
-
-实际执行：`lw → addi → branch`（跳过了 sw 和第二个 lw）
+`uart_init` 延迟循环中的 store/load 指令被跳过，导致循环无法正确递增变量 `i`。
 
 **根因分析**：
 
-1. **LSU out_valid 持续问题**：当不需要访存的指令（如 branch）通过 LSU 时，`out_valid=1` 在 WBU 忙时不会清零
-2. **重复握手**：WBU 完成后回到 IDLE，又看到 `mem_wb_valid=1`，再次锁存同样数据
-3. **flush 时序问题**：branch 在 EX 阶段触发 flush，但已在流水线中的 sw/lw 被错误冲刷
+问题出在 `stall_mem` 始终为 `1'b0`。当 MEM 阶段忙（处理 load/store）时，`stall_ex=1` 暂停了 EX 阶段，
+但 EX/MEM 级间寄存器仍然会更新（因为 `stall_mem=0`）。这导致：
 
-**已尝试修复**：
+1. 当 `lw` 在 MEM 阶段等待内存响应时，`exu_out_valid=0`（因为 ID/EX 没有新数据）
+2. 由于 `stall_mem=0`，EX/MEM 寄存器被更新，`ex_mem_valid <= 0`
+3. 这导致 RAW 冒险检测失效（`mem_writes_reg` 变成 false）
+4. 后续的 `addi` 指令使用了旧的寄存器值，而不是等待 `lw` 结果
 
-修改 `LSU_pipeline.v` 的 `out_valid` 清零逻辑，确保每条指令只输出一个周期的 valid：
+**修复方案**：
+
+将 `stall_mem` 从 `1'b0` 改为 `mem_busy`：
 ```verilog
-// S_IDLE 状态
-if (out_valid && !in_valid) begin
-    out_valid <= 1'b0;  // 无新输入时清零
-end else if (in_valid && in_ready) begin
-    // ... 正常处理
-end else if (out_valid && out_ready) begin
-    out_valid <= 1'b0;  // 数据被消费
-end
+// 修复前
+assign stall_mem = 1'b0;  // MEM 阶段不暂停
+
+// 修复后
+assign stall_mem = mem_busy;  // MEM 阶段忙时保持 EX/MEM 寄存器不变
 ```
 
-### 4.4 待解决问题
+**验证结果**：
 
-1. **store/load 指令被跳过**
-   - 需检查 flush 信号是否错误地冲刷了 MEM 阶段的指令
-   - 检查 EX/MEM 寄存器在 flush 时的处理
+- `dummy` 测试: ✅ 通过 (HIT GOOD TRAP)
+- `microbenchmark` 测试: ✅ 通过
+- `add` 测试: ✅ 通过
+- `fib` 测试: ✅ 通过
+- `load-store` 测试: ✅ 通过
+- `recursion` 测试: ✅ 通过
 
-2. **分支重复提交**
-   - MEM/WB 的 valid 信号清零时序需要与 LSU out_valid 协调
-   - 可能需要在 MEM/WB 层级增加握手确认机制
+### 4.4 当前状态
+
+所有主要问题已修复。流水线处理器能够正确执行测试程序。
 
 ---
 
