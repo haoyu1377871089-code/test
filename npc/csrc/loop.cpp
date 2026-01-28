@@ -1,14 +1,14 @@
 #include "sim.h"
-#include "Vtop.h"
+#include "VysyxSoCFull.h"
 #if VM_TRACE
 #include "verilated_vcd_c.h"
 #endif
 #include <cstdio>
 
 #if VM_TRACE
-void execute_first_instruction(Vtop *top, uint32_t currentPC, VerilatedVcdC *tfp, uint64_t &sim_time) {
+void execute_first_instruction(VysyxSoCFull *top, uint32_t currentPC, VerilatedVcdC *tfp, uint64_t &sim_time) {
 #else
-void execute_first_instruction(Vtop *top, uint32_t currentPC, void *tfp, uint64_t &sim_time) {
+void execute_first_instruction(VysyxSoCFull *top, uint32_t currentPC, void *tfp, uint64_t &sim_time) {
 #endif
     // 设置第一条指令
     top->op = pc_inst[currentPC];
@@ -37,9 +37,9 @@ void execute_first_instruction(Vtop *top, uint32_t currentPC, void *tfp, uint64_
 }
 
 #if VM_TRACE
-bool process_one_cycle(Vtop *top, uint32_t &currentPC, bool &sdop_en_state, VerilatedVcdC *tfp, uint64_t &sim_time) {
+bool process_one_cycle(VysyxSoCFull *top, uint32_t &currentPC, bool &sdop_en_state, VerilatedVcdC *tfp, uint64_t &sim_time) {
 #else
-bool process_one_cycle(Vtop *top, uint32_t &currentPC, bool &sdop_en_state, void *tfp, uint64_t &sim_time) {
+bool process_one_cycle(VysyxSoCFull *top, uint32_t &currentPC, bool &sdop_en_state, void *tfp, uint64_t &sim_time) {
 #endif
     if (top->rdop_en) {
         currentPC = top->dnpc;

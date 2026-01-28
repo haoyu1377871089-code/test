@@ -1,5 +1,5 @@
 #include "sim.h"
-#include "Vtop.h"
+#include "VysyxSoCFull.h"
 #include "verilated_vcd_c.h"
 #include <fstream>
 #include <iostream>
