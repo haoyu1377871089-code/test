@@ -6,8 +6,8 @@ NVBOARD_HOME ?= $(abspath ../nvboard)
 AM_HOME ?= $(abspath ../abstract-machine)
 
 YSYXSOC_BUILD_V = $(YSYX_SOC_HOME)/build/ysyxSoCFull.v
-YSYXSOC_READY_V = $(YSYX_SOC_HOME)/ready-to-run/D-stage/ysyxSoCFull.v
-YSYXSOC_V := $(if $(wildcard $(YSYXSOC_BUILD_V)),$(YSYXSOC_BUILD_V),$(YSYXSOC_READY_V))
+YSYXSOC_FALLBACK_V = $(YSYX_SOC_HOME)/ysyxSoCTop.sv
+YSYXSOC_V := $(if $(wildcard $(YSYXSOC_BUILD_V)),$(YSYXSOC_BUILD_V),$(YSYXSOC_FALLBACK_V))
 
 YSYXSOC_PERIP = $(YSYX_SOC_HOME)/perip
 YSYXSOC_PERIP_V = $(shell find $(YSYXSOC_PERIP) -name "*.v" -o -name "*.sv")
