@@ -24,10 +24,10 @@
 | 阶段 | 任务内容 | 状态 |
 |------|----------|------|
 | 阶段1 | 拆分模块 + 串行执行验证（无流水线，仍为多周期） | ✅ 已完成 |
-| 阶段2 | 实现流水线连接 + 简单测试（无 RAW 依赖的程序） | 🔄 进行中 |
-| 阶段3 | 实现 RAW 阻塞 + 带依赖的测试用例 | 🔄 进行中（已实现基础逻辑） |
+| 阶段2 | 实现流水线连接 + 简单测试（无 RAW 依赖的程序） | ✅ 已完成 |
+| 阶段3 | 实现 RAW 阻塞 + 带依赖的测试用例 | ✅ 已完成 (CPI ~35) |
 | 阶段4 | 实现转发技术 + 验证性能提升 | ⏳ 待开始 |
-| 阶段5 | 实现控制冒险处理 + 分支/跳转测试 | 🔄 进行中（发现 flush 问题） |
+| 阶段5 | 实现控制冒险处理 + 分支/跳转测试 | ✅ 已完成（flush 问题已修复） |
 | 阶段6 | 实现异常和 fence.i + 完整测试 | ⏳ 待开始 |
 
 ---
@@ -146,15 +146,51 @@ end else if (out_valid && out_ready) begin
 end
 ```
 
-### 4.4 待解决问题
+### 4.4 已修复问题 (2026-01-28 最终修复)
 
-1. **store/load 指令被跳过**
-   - 需检查 flush 信号是否错误地冲刷了 MEM 阶段的指令
-   - 检查 EX/MEM 寄存器在 flush 时的处理
+**问题 #4/#5 根因分析**：
 
-2. **分支重复提交**
-   - MEM/WB 的 valid 信号清零时序需要与 LSU out_valid 协调
-   - 可能需要在 MEM/WB 层级增加握手确认机制
+流水线阻塞逻辑有两个关键错误：
+
+1. **ID/EX 寄存器在 RAW 冒险时保持原值**
+   - 当 `stall_id=1`（RAW 冒险）但 `stall_ex=0`（MEM 不忙）时，ID/EX 保持原值
+   - 这导致 EX 阶段的指令被重复传递到 MEM，造成重复提交
+
+2. **RAW 检测与 WBU 写回不同步**
+   - RAW 检测使用 `mem_wb_valid`，但 WBU 需要 2 个周期才能完成写回
+   - 当 `mem_wb_valid=0` 时 WBU 可能仍在写回，导致 RAW 检测提前解除
+
+**修复方案**：
+
+1. ID/EX 更新逻辑修正：
+   ```verilog
+   // 当 EX 不阻塞时才更新 ID/EX
+   if (stall_ex) begin
+       // MEM 忙时保持原值
+   end else begin
+       if (!stall_id && idu_out_valid) begin
+           // 正常传递
+       end else begin
+           // RAW 冒险或无效时，插入气泡
+           id_ex_valid <= 1'b0;
+       end
+   end
+   ```
+
+2. RAW 检测增强：
+   ```verilog
+   // 同时检测 MEM/WB 中的待写回数据和 WBU 正在写回的数据
+   wire pending_wb_writes = mem_wb_valid && mem_wb_reg_wen && (pending_wb_rd != 5'b0);
+   wire wbu_writing = wbu_rf_wen && (wbu_wr_rd != 5'b0);
+   wire raw_hazard = ... || raw_pending_wb || raw_wbu;
+   ```
+
+**测试结果**：
+- `dummy`: PASSED (CPI 37.99)
+- `microbenchmark`: PASSED (CPI 34.72)
+- `add`, `load-store`, `fib`, `bubble-sort`, `string`: PASSED
+- `quick-sort`, `div`, `mul-longlong`, `fact`, `prime`, `shift`, `bit`, `sum`, `if-else`: PASSED
+- `recursion`: 运行中（递归深度大，需要较长时间）
 
 ---
 
