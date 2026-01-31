@@ -216,8 +216,10 @@ module NPC_pipeline (
     
     // ========== 冒险检测和暂停逻辑 ==========
     
-    // 结构冒险: MEM 阶段访存时需要暂停
-    wire mem_busy = ex_mem_valid && (ex_mem_mem_ren || ex_mem_mem_wen) && !lsu_out_valid;
+    // 结构冒险: MEM 阶段有指令且 LSU 未完成时需要暂停
+    // 关键修复：所有指令（包括非访存指令）都需要等待 LSU 输出有效
+    // 才能从 EX/MEM 前进，否则指令会丢失
+    wire mem_busy = ex_mem_valid && !lsu_out_valid;
     
     // ========== RAW 数据冒险检测与转发 ==========
     // 转发技术：将后续阶段的计算结果直接转发到 ID 阶段，避免等待写回
@@ -429,6 +431,8 @@ module NPC_pipeline (
     wire idu_in_ready;
     
     // ID/EX 级间寄存器更新
+    // 关键修复：当 stall_id=1 但 stall_ex=0 时，EX 阶段执行当前指令后需要插入气泡，
+    // 防止同一条指令被重复执行
     always @(posedge clk or posedge rst) begin
         if (rst) begin
             id_ex_valid <= 1'b0;
@@ -484,13 +488,13 @@ module NPC_pipeline (
                 id_ex_is_system <= idu_out_is_system;
                 id_ex_is_fence <= idu_out_is_fence;
                 id_ex_is_csr <= idu_out_is_csr;
-            end else if (!stall_id) begin
-                // ID 阶段不被阻塞但无有效输出，插入气泡
+            end else begin
+                // ID 阶段被阻塞或无有效输出时，插入气泡
+                // 这确保当前 EX 阶段的指令执行后，不会被重复执行
                 id_ex_valid <= 1'b0;
             end
-            // else: stall_id = 1，保持 ID/EX 不变，让当前指令继续执行
         end
-        // stall_ex = 1 时，保持 ID/EX 不变
+        // stall_ex = 1 时，保持 ID/EX 不变（EX 阶段正在等待 MEM 完成）
     end
     
     // ========== EX 阶段逻辑 ==========

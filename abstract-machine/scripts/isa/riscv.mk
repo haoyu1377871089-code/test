@@ -3,7 +3,8 @@ CROSS_COMPILE := riscv64-linux-gnu-
 COMMON_CFLAGS := -fno-pic -march=rv64g -mcmodel=medany -mstrict-align -ffreestanding -nostdlib
 CFLAGS        += $(COMMON_CFLAGS) -static -nostdinc \
                  -I$(AM_HOME)/klib/include \
-                 -isystem /usr/lib/gcc-cross/riscv64-linux-gnu/13/include
+                 -isystem /usr/lib/gcc-cross/riscv64-linux-gnu/11/include \
+                 -isystem /usr/riscv64-linux-gnu/include
 ASFLAGS       += $(COMMON_CFLAGS) -O0
 LDFLAGS       += -melf64lriscv -nostdlib
 

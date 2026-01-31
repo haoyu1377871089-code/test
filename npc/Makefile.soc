@@ -69,31 +69,53 @@ endif
 ALL_VSRCS = $(YSYXSOC_VFILE) $(PERIP_VSRCS) $(NPC_VSRCS)
 
 # ========== C++ 源文件 ==========
-# 使用简化的 main_soc_simple.cpp (无 NVBoard 依赖)
-CSRCS = $(NPC_HOME)/csrc/main_soc_simple.cpp \
-        $(NPC_HOME)/csrc/dev/devices.cpp \
-        $(NPC_HOME)/csrc/memory.cpp
+# 默认使用简化版本 (无 NVBoard 依赖)
+# 通过 NVBOARD=1 启用 NVBoard 支持
+# 公共模块在 csrc/common/
+ifdef NVBOARD
+    CSRCS = $(NPC_HOME)/csrc/ysyxsoc/main_soc.cpp \
+            $(NPC_HOME)/csrc/common/dev/devices.cpp \
+            $(NPC_HOME)/csrc/common/memory.cpp
+else
+    CSRCS = $(NPC_HOME)/csrc/ysyxsoc/main_soc_simple.cpp \
+            $(NPC_HOME)/csrc/common/dev/devices.cpp \
+            $(NPC_HOME)/csrc/common/memory.cpp
+endif
 
-# ========== NVBoard 桩函数 (禁用 NVBoard) ==========
-SRC_AUTO_BIND = $(abspath $(BUILD_DIR)/auto_bind.cpp)
-
-$(SRC_AUTO_BIND):
-	@mkdir -p $(BUILD_DIR)
-	@echo "Creating NVBoard stub..."
-	@echo '#include <cstdio>' > $@
-	@echo '#include <cstdint>' >> $@
-	@echo 'extern "C" {' >> $@
-	@echo 'void nvboard_bind_all_pins(void* top) {}' >> $@
-	@echo 'void nvboard_init() {}' >> $@
-	@echo 'void nvboard_quit() {}' >> $@
-	@echo 'void nvboard_update() {}' >> $@
-	@echo 'int16_t uart_divisor_cnt = 0;' >> $@
-	@echo '}' >> $@
-
-CSRCS += $(SRC_AUTO_BIND)
+# ========== NVBoard 配置 ==========
+ifdef NVBOARD
+    # 使用真正的 NVBoard
+    include $(NVBOARD_HOME)/scripts/nvboard.mk
+    NXDC_FILES = $(NPC_HOME)/constr/ysyxsoc.nxdc
+    SRC_AUTO_BIND = $(abspath $(BUILD_DIR)/auto_bind.cpp)
+    $(SRC_AUTO_BIND): $(NXDC_FILES)
+		@mkdir -p $(BUILD_DIR)
+		python3 $(NVBOARD_HOME)/scripts/auto_pin_bind.py $^ $@
+    CSRCS += $(SRC_AUTO_BIND)
+else
+    # NVBoard 桩函数 (禁用 NVBoard)
+    SRC_AUTO_BIND = $(abspath $(BUILD_DIR)/auto_bind.cpp)
+    $(SRC_AUTO_BIND):
+		@mkdir -p $(BUILD_DIR)
+		@echo "Creating NVBoard stub..."
+		@echo '#include <cstdio>' > $@
+		@echo '#include <cstdint>' >> $@
+		@echo 'extern "C" {' >> $@
+		@echo 'void nvboard_bind_all_pins(void* top) {}' >> $@
+		@echo 'void nvboard_init() {}' >> $@
+		@echo 'void nvboard_quit() {}' >> $@
+		@echo 'void nvboard_update() {}' >> $@
+		@echo 'int16_t uart_divisor_cnt = 0;' >> $@
+		@echo '}' >> $@
+    CSRCS += $(SRC_AUTO_BIND)
+endif
 
 # ========== 编译选项 ==========
-INC_PATH = -I$(NPC_HOME)/csrc -I$(NPC_HOME)/csrc/dev
+INC_PATH = -I$(NPC_HOME)/csrc/ysyxsoc -I$(NPC_HOME)/csrc/common -I$(NPC_HOME)/csrc/common/dev
+ifdef NVBOARD
+    # usr/include must come before include (nvboard_bind_pin is only declared in usr/include/nvboard.h)
+    INC_PATH += -I$(NVBOARD_HOME)/usr/include -I$(NVBOARD_HOME)/include
+endif
 
 # SDL2 配置
 SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null)
@@ -110,10 +132,14 @@ ifneq ($(wildcard $(AM_HOME)/am/include),)
 endif
 
 CXXFLAGS = $(INC_PATH) -DTOP_NAME="\"VysyxSoCFull\"" -std=c++11 $(SDL2_CFLAGS)
-LDFLAGS = -ldl -lrt -lpthread $(SDL2_LDFLAGS)
+ifdef NVBOARD
+    LDFLAGS = -ldl -lrt -lpthread $(NVBOARD_HOME)/build/nvboard.a $(SDL2_LDFLAGS) -lSDL2_image -lSDL2_ttf
+else
+    LDFLAGS = -ldl -lrt -lpthread $(SDL2_LDFLAGS)
+endif
 
 # ========== 构建规则 ==========
-.PHONY: default all soc pipeline clean run help
+.PHONY: default all soc pipeline nvboard nvboard-pipeline clean run help
 
 default: soc
 
@@ -127,7 +153,21 @@ pipeline:
 	$(MAKE) -f Makefile.soc PIPELINE=1 $(BIN)
 	@echo "Built pipeline version with I-Cache enabled"
 
+# NVBoard 多周期版本
+nvboard:
+	$(MAKE) -f Makefile.soc NVBOARD=1 $(BIN)
+	@echo "Built multi-cycle version with NVBoard support"
+
+# NVBoard 流水线版本
+nvboard-pipeline:
+	$(MAKE) -f Makefile.soc PIPELINE=1 NVBOARD=1 $(BIN)
+	@echo "Built pipeline version with NVBoard support"
+
+ifdef NVBOARD
+$(BIN): $(ALL_VSRCS) $(CSRCS) $(NVBOARD_ARCHIVE)
+else
 $(BIN): $(ALL_VSRCS) $(CSRCS)
+endif
 	@echo "Building ysyxSoC simulation..."
 	@echo "  ysyxSoC verilog: $(YSYXSOC_VFILE)"
 	@echo "  NPC verilog dir: $(NPC_VSRC_DIR)"
@@ -135,6 +175,9 @@ ifdef PIPELINE
 	@echo "  Mode: Pipeline"
 else
 	@echo "  Mode: Multi-cycle"
+endif
+ifdef NVBOARD
+	@echo "  NVBoard: Enabled"
 endif
 	@rm -rf $(OBJ_DIR)
 	$(VERILATOR) $(VERILATOR_FLAGS) \

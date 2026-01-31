@@ -37,10 +37,20 @@ __pycache__/
 
 # Backups
 *_backup_*/
-npc_backup_*/
+*backup*/
 *.bak
 *.old
+
+# Documentation (generated)
+docs/
+makefile_docs/
+
+# Backend (synthesis & STA)
+*.sdc
+synth_output/
+sta/
 
 # Specific generated files
 tags
 cscope.out
+*.csv
